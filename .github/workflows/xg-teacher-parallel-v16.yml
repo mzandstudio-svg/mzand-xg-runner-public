@@ -1,0 +1,149 @@
+name: XG Teacher Parallel v16
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-teacher-parallel-v16.yml
+      - scripts/xg-parallel-candidate-rollout-v16.ps1
+      - scripts/aggregate_parallel_rollouts.py
+      - scripts/parse_xg_position_export.py
+      - scripts/xg-reach-xgid.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  rollout-candidate:
+    name: rollout-candidate-${{ matrix.rank }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        rank: [1, 2, 3, 4, 5]
+    steps:
+      - name: Publish runner start
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+        run: |
+          $payload=@{state='pending';context="xg-v16/candidate-$env:CANDIDATE_RANK/runner";description="Windows runner started for candidate $env:CANDIDATE_RANK"}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          $payload=@{state='success';context="xg-v16/run-$env:GITHUB_RUN_ID-c$env:CANDIDATE_RANK";description="workflow run id=$env:GITHUB_RUN_ID candidate=$env:CANDIDATE_RANK"}|ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if(Test-Path $log){Copy-Item $log "$env:GITHUB_WORKSPACE\xg-install-c${{ matrix.rank }}.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw 'XG executable missing'}
+          "xgexe=$exe"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Complete one 1296-game candidate rollout
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+        run: ./scripts/xg-parallel-candidate-rollout-v16.ps1
+
+      - name: Upload candidate teacher record
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v16-candidate-${{ matrix.rank }}
+          path: |
+            xg-v16-candidate-${{ matrix.rank }}-report.txt
+            xg-v16-candidate-${{ matrix.rank }}-baseline.txt
+            xg-v16-candidate-${{ matrix.rank }}-baseline.json
+            xg-v16-candidate-${{ matrix.rank }}-final-position.txt
+            xg-v16-candidate-${{ matrix.rank }}-final-position.json
+            xg-v16-candidate-${{ matrix.rank }}-rollout.json
+            xg-v16-candidate-${{ matrix.rank }}-*.png
+            xg-install-c${{ matrix.rank }}.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish candidate final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+        run: |
+          $state=$(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})
+          $payload=@{state=$state;context="xg-v16/candidate-$env:CANDIDATE_RANK/job";description="candidate $env:CANDIDATE_RANK job=$env:JOB_STATUS"}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          $payload=@{state='success';context="xg-v16/candidate-$env:CANDIDATE_RANK/runner";description="candidate runner reached final status"}|ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+
+  aggregate-teacher:
+    name: aggregate-teacher-label
+    needs: rollout-candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download five rollout records
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xg-v16-candidate-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Aggregate teacher label
+        run: |
+          python scripts/aggregate_parallel_rollouts.py artifacts xg-v16-teacher-label.json | tee xg-v16-teacher-summary.txt
+          python - <<'PY'
+          import json
+          d=json.load(open('xg-v16-teacher-label.json',encoding='utf-8'))
+          assert d['candidate_count']==5
+          assert all(c['rollout_games']==1296 for c in d['candidates'])
+          assert all(c['analysis_method']=='Rollout' for c in d['candidates'])
+          print('teacher_label_valid=True')
+          PY
+
+      - name: Upload merged teacher label
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v16-teacher-label
+          path: |
+            xg-v16-teacher-label.json
+            xg-v16-teacher-summary.txt
+          retention-days: 30
+
+      - name: Publish teacher gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          payload=json.dumps({'state':'success','context':'xg-v16/teacher-label','description':'Five independent 1296-game rollouts aggregated'}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
