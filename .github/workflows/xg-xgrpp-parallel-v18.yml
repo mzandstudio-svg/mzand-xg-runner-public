@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/xg-xgrpp-parallel-v18.yml
       - scripts/xg-parallel-candidate-xgrpp-v18.ps1
+      - scripts/parse_xg_position_export.py
       - scripts/aggregate_xgrpp_vs_teacher.py
       - references/xg-v16-test-teacher.json
   workflow_dispatch:
@@ -13,6 +14,10 @@ on:
 permissions:
   contents: read
   statuses: write
+
+concurrency:
+  group: xg-v18-coverage-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   xgrpp-candidate:
