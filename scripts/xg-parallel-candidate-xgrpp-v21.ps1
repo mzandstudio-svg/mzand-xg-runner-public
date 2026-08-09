@@ -101,6 +101,41 @@ $baseline|ConvertTo-Json -Depth 12|Set-Content (Join-Path $env:GITHUB_WORKSPACE 
 '@
 if(-not$src.Contains($old)){throw 'v18 fixed Analyze Position block not found'}
 $generated=$src.Replace($old,$new)
+
+$pollOld=@'
+  try{
+    $text=ExportText $xg
+    if($text.Length-lt100){continue}
+    $parsed=ParseExport $text "$prefix-poll"
+    $hit=$parsed.candidates|Where-Object{$_.move-eq$targetMove -and $_.analysis_method-eq'XG Roller++'}|Select-Object -First 1
+    if($null-ne$hit){$complete=$true;$finalText=$text;$finalParsed=$parsed;break}
+    "T=${elapsed}s TARGET_METHOD_PENDING"|Out-File $report -Append
+  }catch{"T=${elapsed}s PARSE_PENDING=$($_.Exception.Message)"|Out-File $report -Append}
+'@
+$pollNew=@'
+  try{
+    # XG omits the currently selected move from Ctrl+C while a row-level
+    # analysis result is active. Select a different row before exporting so
+    # the target XGR++ row remains present in the partial clipboard payload.
+    $probeRank=if($rank-ne5){5}else{4}
+    $probeY=[int]$wr.Top+370+(43*($probeRank-1))
+    LeftClick $rowX $probeY
+    Start-Sleep -Milliseconds 250
+    $text=ExportText $xg
+    if($text.Length-lt100){continue}
+    $partialTxt=Join-Path $env:GITHUB_WORKSPACE "$prefix-poll.txt"
+    $partialJson=Join-Path $env:GITHUB_WORKSPACE "$prefix-poll.json"
+    Set-Content $partialTxt $text -Encoding UTF8
+    & python "$env:GITHUB_WORKSPACE\scripts\parse_xg_position_export.py" $partialTxt $partialJson --allow-partial|Out-Null
+    if($LASTEXITCODE-ne0){throw "partial parse failed for $prefix-poll"}
+    $parsed=Get-Content $partialJson -Raw|ConvertFrom-Json
+    $hit=$parsed.candidates|Where-Object{$_.move-eq$targetMove -and $_.analysis_method-eq'XG Roller++'}|Select-Object -First 1
+    if($null-ne$hit){$complete=$true;$finalText=$text;$finalParsed=$parsed;break}
+    "T=${elapsed}s TARGET_METHOD_PENDING ranks=$([string]::Join(',',@($parsed.candidate_ranks)))"|Out-File $report -Append
+  }catch{"T=${elapsed}s PARSE_PENDING=$($_.Exception.Message)"|Out-File $report -Append}
+'@
+if(-not$generated.Contains($pollOld)){throw 'v18 XGR++ polling block not found'}
+$generated=$generated.Replace($pollOld,$pollNew)
 $tmp=Join-Path $env:RUNNER_TEMP "xg-v21-xgrpp-candidate-$env:CANDIDATE_RANK.ps1"
 Set-Content $tmp $generated -Encoding UTF8
 & $tmp
