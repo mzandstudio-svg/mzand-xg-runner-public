@@ -1,0 +1,93 @@
+name: XG Top5 Rollout v9 Start Prompt
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/xg-top5-rollout-v9-start-prompt.yml
+      - scripts/xg-top5-rollout-start-prompt.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  start-prompt:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post 'xg-top5-v9/runner-start' 'pending' 'Public Windows runner started'
+          Post "xg-top5-v9/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Select top five click Start and capture prompt
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-top5-rollout-start-prompt.ps1
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-top5-rollout-v9-start-prompt
+          path: |
+            xg-install.log
+            xg-reach-xgid-report.txt
+            xg-top5-v9-report.txt
+            xg-top5-v9-*.png
+            xg-top5-v9-*-ui.txt
+            xg-*.png
+            xg-*-processes.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          $ok=Test-Path "$env:GITHUB_WORKSPACE\xg-top5-v9-duration-dialog-3s.png"
+          Post 'xg-top5-v9/evidence' ($(if($ok){'success'}else{'failure'})) "duration evidence=$ok"
+          Post 'xg-top5-v9/job' ($(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})) "job=$env:JOB_STATUS"
+          Post 'xg-top5-v9/runner-start' 'success' 'runner reached final status'
