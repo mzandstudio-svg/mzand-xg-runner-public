@@ -43,7 +43,7 @@ $beforeSource=TopSource $baseline
 "BASELINE_CLIPBOARD_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
 if(-not$beforeSource){throw 'Could not parse baseline top candidate source'}
 "BOOK_BASELINE_ALLOWED: $($beforeSource-like'Book*')"|Out-File $report15 -Append
-Post 'xg-public-v15/baseline-ready' 'success' "baseline top source=$beforeSource"
+Post 'xg-public-v15/baseline-ready' 'success' 'baseline export ready'
 
 $wr=New-Object V15N+RECT
 if(-not[V15N]::GetWindowRect($hwnd,[ref]$wr)){throw 'GetWindowRect failed'}
@@ -87,7 +87,7 @@ if($final.Length-gt0){Set-Content "$env:GITHUB_WORKSPACE\xg-v15-after-xgrpp.txt"
 "XGRPP_COMPLETED_BY_EXPORT: $complete"|Out-File $report15 -Append
 "XGRPP_ELAPSED_SECONDS: $elapsed"|Out-File $report15 -Append
 if(-not$complete){throw 'XG Roller++ did not become the exported top source within 600 seconds'}
-Post 'xg-public-v15/xgrpp-export-confirmed' 'success' "exported top source became XG Roller++ after ${elapsed}s"
+Post 'xg-public-v15/xgrpp-export-confirmed' 'success' "XG Roller++ export confirmed after ${elapsed}s"
 Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
 '@
 $generated=Join-Path $env:RUNNER_TEMP 'xg-v15-generated.ps1'
