@@ -73,7 +73,7 @@ def parse_export(text: str):
         r"^Score is X:(\d+) O:(\d+) (\d+) pt\.\(s\) match\.\s*$", text, re.MULTILINE
     )
     pip_match = re.search(r"^Pip count\s+X:\s*(\d+)\s+O:\s*(\d+).*?$", text, re.MULTILINE)
-    cube_match = re.search(r"^Cube:\s*(\d+)\s*$", text, re.MULTILINE)
+    cube_match = re.search(r"^Cube:\s*(\d+)(?:\s*,\s*(.*?))?\s*$", text, re.MULTILINE)
     roll_match = re.search(r"^([XO]) to play\s+(\d)(\d)\s*$", text, re.MULTILINE)
     version_match = re.search(r"^eXtreme Gammon Version:\s*(.+)$", text, re.MULTILINE)
 
@@ -149,6 +149,7 @@ def parse_export(text: str):
                 f"reported={candidate['equity_delta']} expected={expected_delta}"
             )
 
+    cube_detail = cube_match.group(2).strip() if cube_match.group(2) else None
     result = {
         "schema": "mzand.xg.position-label.v1",
         "xgid": f"XGID={xgid_payload}",
@@ -167,6 +168,7 @@ def parse_export(text: str):
             "o": int(pip_match.group(2)) if pip_match else None,
         },
         "cube": int(cube_match.group(1)),
+        "cube_detail": cube_detail,
         "on_roll": roll_match.group(1),
         "dice": [int(roll_match.group(2)), int(roll_match.group(3))],
         "candidate_count": len(candidates),
