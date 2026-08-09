@@ -1,0 +1,24 @@
+{
+  "schema": "mzand.xg.screening-label.v1",
+  "scope": "non-pristine development position",
+  "xgid": "XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:31:6:16:0:19:10",
+  "candidate_count": 5,
+  "best_move": "8/4",
+  "best_equity": -0.560,
+  "second_move": "6/3 4/3",
+  "second_equity": -0.581,
+  "top1_gap": 0.021,
+  "screening_method_mix": {"XG Roller++": 5},
+  "reused_existing_count": 0,
+  "fresh_xgrpp_count": 5,
+  "candidates": [
+    {"rank":1,"source":"XG Roller++","move":"8/4","equity":-0.560,"equity_delta":0.0,"player":{"win":0.3420,"gammon":0.0493,"backgammon":0.0017},"opponent":{"win":0.6580,"gammon":0.2110,"backgammon":0.0038},"analysis_method":"XG Roller++","original_analysis_rank":1,"screening_method":"XG Roller++","screening_reused_existing":false,"screening_elapsed_seconds":10,"screening_rank":1},
+    {"rank":1,"source":"XG Roller++","move":"6/3 4/3","equity":-0.581,"equity_delta":0.0,"player":{"win":0.3374,"gammon":0.0481,"backgammon":0.0017},"opponent":{"win":0.6626,"gammon":0.2201,"backgammon":0.0037},"analysis_method":"XG Roller++","original_analysis_rank":2,"screening_method":"XG Roller++","screening_reused_existing":false,"screening_elapsed_seconds":10,"screening_rank":2},
+    {"rank":1,"source":"XG Roller++","move":"13/9","equity":-0.648,"equity_delta":0.0,"player":{"win":0.3270,"gammon":0.0565,"backgammon":0.0024},"opponent":{"win":0.6730,"gammon":0.2526,"backgammon":0.0070},"analysis_method":"XG Roller++","original_analysis_rank":3,"screening_method":"XG Roller++","screening_reused_existing":false,"screening_elapsed_seconds":10,"screening_rank":3},
+    {"rank":1,"source":"XG Roller++","move":"24/21 4/3","equity":-0.655,"equity_delta":0.0,"player":{"win":0.3412,"gammon":0.0505,"backgammon":0.0017},"opponent":{"win":0.6588,"gammon":0.2826,"backgammon":0.0052},"analysis_method":"XG Roller++","original_analysis_rank":4,"screening_method":"XG Roller++","screening_reused_existing":false,"screening_elapsed_seconds":10,"screening_rank":4},
+    {"rank":1,"source":"XG Roller++","move":"24/23 6/3","equity":-0.656,"equity_delta":0.0,"player":{"win":0.3341,"gammon":0.0518,"backgammon":0.0019},"opponent":{"win":0.6659,"gammon":0.2718,"backgammon":0.0051},"analysis_method":"XG Roller++","original_analysis_rank":5,"screening_method":"XG Roller++","screening_reused_existing":false,"screening_elapsed_seconds":10,"screening_rank":5}
+  ],
+  "source_run_id": 31340545564,
+  "source_commit": "b6d8d11fae350f3eadb1362b5b944f7664f0c75e",
+  "source_artifact_id": 9045715631
+}
