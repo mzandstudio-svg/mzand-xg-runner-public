@@ -41,7 +41,7 @@ function DumpMenus([string]$name){
   foreach($e in $all){
     try{
       $r=$e.Current.BoundingRectangle
-      if($e.Current.ProcessId-eq$script:xg.Id -or $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Menu -or $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::MenuItem){
+      if($e.Current.ProcessId-eq$script:xg.Id -or $e.Current.ClassName-eq'#32768' -or $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Menu -or $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::MenuItem){
         $lines.Add("PID=[$($e.Current.ProcessId)] Name=[$($e.Current.Name)] Type=[$($e.Current.ControlType.ProgrammaticName)] Class=[$($e.Current.ClassName)] Id=[$($e.Current.AutomationId)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]")
       }
     }catch{}
@@ -82,30 +82,32 @@ Start-Sleep -Milliseconds 500
 Shot 'xg-top5-v8-selected-five'
 RightClick $x $ys[4]
 Start-Sleep -Milliseconds 700
+Shot 'xg-top5-v8-context-menu'
+DumpMenus 'xg-top5-v8-context-menu'
 
 $root=[System.Windows.Automation.AutomationElement]::RootElement
 $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 $context=$null
 foreach($m in $all){
   try{
-    if($m.Current.ProcessId-eq$script:xg.Id -and $m.Current.ControlType-eq[System.Windows.Automation.ControlType]::Menu -and $m.Current.ClassName-eq'#32768'){$context=$m;break}
+    if($m.Current.ProcessId-eq$script:xg.Id -and $m.Current.ClassName-eq'#32768'){$context=$m;break}
   }catch{}
 }
-if($null-eq$context){Shot 'xg-top5-v8-no-context-menu';DumpMenus 'xg-top5-v8-no-context-menu';throw 'Context menu not found'}
-$children=$context.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
-$menuItems=@()
-foreach($child in $children){try{if($child.Current.ControlType-eq[System.Windows.Automation.ControlType]::MenuItem){$menuItems+=,$child}}catch{}}
-$ordered=@($menuItems|Sort-Object{try{$_.Current.BoundingRectangle.Y}catch{99999}})
-"CONTEXT_MENU_ITEM_COUNT: $($ordered.Count)"|Out-File $report -Append
-if($ordered.Count-lt12){Shot 'xg-top5-v8-too-few-context-items';DumpMenus 'xg-top5-v8-too-few-context-items';throw "Expected at least 12 context items, got $($ordered.Count)"}
-$rolloutItem=$ordered[11]
-$rr=$rolloutItem.Current.BoundingRectangle
-"ROLLOUT_CONTEXT_RECT: $($rr.X),$($rr.Y),$($rr.Width),$($rr.Height)"|Out-File $report -Append
-[R8N]::SetCursorPos([int]($rr.X+$rr.Width/2),[int]($rr.Y+$rr.Height/2))|Out-Null
+if($null-eq$context){throw 'Context popup #32768 not found'}
+$cr=$context.Current.BoundingRectangle
+"CONTEXT_POPUP_TYPE: $($context.Current.ControlType.ProgrammaticName)"|Out-File $report -Append
+"CONTEXT_POPUP_RECT: $($cr.X),$($cr.Y),$($cr.Width),$($cr.Height)"|Out-File $report -Append
+if($cr.Width-lt200 -or $cr.Height-lt400){throw "Unexpected context popup geometry [$($cr.Width)x$($cr.Height)]"}
+
+# v7 evidence proved Rollout is the twelfth 19px row: center = popup top + 221.5px.
+$rollX=[int]($cr.X+($cr.Width/2))
+$rollY=[int]($cr.Y+221)
+"ROLLOUT_HOVER_POINT: $rollX,$rollY"|Out-File $report -Append
+[R8N]::SetCursorPos($rollX,$rollY)|Out-Null
 Start-Sleep 1
 Shot 'xg-top5-v8-rollout-submenu'
 DumpMenus 'xg-top5-v8-rollout-submenu'
 'ROLLOUT_SUBMENU_CAPTURED: True'|Out-File $report -Append
-Post 'xg-top5-v8/submenu' 'success' 'Rollout submenu hovered and captured'
+Post 'xg-top5-v8/submenu' 'success' 'Rollout submenu hovered and captured from popup geometry'
 Get-Content $report
 Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
