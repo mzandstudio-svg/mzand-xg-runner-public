@@ -1,10 +1,11 @@
-name: XG Non-Book Midgame Teacher v19
+name: XG Non-Book Midgame Teacher v19b
 
 on:
   push:
     branches: [xg-teacher-parallel-v16]
     paths:
       - .github/workflows/xg-teacher-midgame-v19.yml
+      - scripts/xg-parallel-candidate-rollout-v19.ps1
   workflow_dispatch:
 
 permissions:
@@ -15,7 +16,7 @@ jobs:
   rollout-candidate:
     name: midgame-rollout-${{ matrix.rank }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       max-parallel: 5
@@ -67,7 +68,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GATE_SHA: ${{ github.sha }}
           CANDIDATE_RANK: ${{ matrix.rank }}
-        run: ./scripts/xg-parallel-candidate-rollout-v16b.ps1
+        run: ./scripts/xg-parallel-candidate-rollout-v19.ps1
 
       - name: Upload candidate teacher record
         if: always()
