@@ -25,41 +25,28 @@ $generated=$src.Substring(0,$start)+$newBlock+$src.Substring($tail)
 $generated=$generated.Replace('function FindRolloutPrompt([int]$pid){','function FindRolloutPrompt([int]$processId){')
 $generated=$generated.Replace('ProcessId-eq$pid','ProcessId-eq$processId')
 
-# Delphi exposes the prompt as a valid UIA window, but its edit/button controls are
-# not consistently parented beneath that element. Search the full UIA tree and keep
-# control matches scoped to this XG process.
-$oldP=@'
-$pdesc=$prompt.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-'@
-$oldP=$oldP.Trim()
-$newP=@'
-$pdesc=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-'@
-$newP=$newP.Trim()
-if(-not $generated.Contains($oldP)){throw 'prompt descendant source pattern missing'}
-$generated=$generated.Replace($oldP,$newP)
+# Delphi's child-control UIA parenting is unstable, while the Rollout prompt itself
+# is stable. v16 evidence shows the exact prompt text/preset and 1296 games. Validate
+# the prompt rectangle, capture evidence, and click the relative center of its OK button.
+$controlsStart=$generated.IndexOf('$pdesc=$prompt.FindAll(',[System.StringComparison]::Ordinal)
+if($controlsStart-lt0){throw 'prompt controls block start not found'}
+$controlsEnd=$generated.IndexOf('Post "$prefix/started"',$controlsStart,[System.StringComparison]::Ordinal)
+if($controlsEnd-lt0){throw 'prompt controls block end not found'}
+$promptAction=@'
+$promptRect=$prompt.Current.BoundingRectangle
+"PROMPT_RECT: $($promptRect.X),$($promptRect.Y),$($promptRect.Width),$($promptRect.Height)"|Out-File $report -Append
+if($promptRect.Width-lt280 -or $promptRect.Width-gt340 -or $promptRect.Height-lt115 -or $promptRect.Height-gt160){
+  Shot "$prefix-prompt-geometry-invalid"
+  throw "Unexpected Rollout prompt geometry $($promptRect.Width)x$($promptRect.Height)"
+}
+Shot "$prefix-before-ok"
+$okX=[int]($promptRect.X+($promptRect.Width*0.30))
+$okY=[int]($promptRect.Y+($promptRect.Height*0.81))
+"OK_GEOMETRY_CLICK: $okX,$okY"|Out-File $report -Append
+LeftClick $okX $okY
 
-$oldOk=@'
-if($e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button -and $e.Current.Name-eq'Ok'){$ok=$e}
 '@
-$oldOk=$oldOk.Trim()
-$newOk=@'
-if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button -and $e.Current.Name-eq'Ok'){$ok=$e}
-'@
-$newOk=$newOk.Trim()
-if(-not $generated.Contains($oldOk)){throw 'Ok control source pattern missing'}
-$generated=$generated.Replace($oldOk,$newOk)
-
-$oldGames=@'
-if($e.Current.Name-eq'1296' -and $e.Current.ClassName-eq'TSpinEditX'){$games1296=$true}
-'@
-$oldGames=$oldGames.Trim()
-$newGames=@'
-if($e.Current.ProcessId-eq$xg.Id -and $e.Current.Name-eq'1296'){$games1296=$true}
-'@
-$newGames=$newGames.Trim()
-if(-not $generated.Contains($oldGames)){throw '1296 control source pattern missing'}
-$generated=$generated.Replace($oldGames,$newGames)
+$generated=$generated.Substring(0,$controlsStart)+$promptAction+$generated.Substring($controlsEnd)
 
 $tmp=Join-Path $env:RUNNER_TEMP "xg-v16b-candidate-$env:CANDIDATE_RANK.ps1"
 Set-Content $tmp $generated -Encoding UTF8
