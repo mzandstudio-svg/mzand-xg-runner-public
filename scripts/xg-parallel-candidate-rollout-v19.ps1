@@ -1,3 +1,4 @@
+# v19c: rerun with cube-owner-aware XG export parser
 $ErrorActionPreference='Stop'
 $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-parallel-candidate-rollout-v16.ps1'
 $src=Get-Content $srcPath -Raw
