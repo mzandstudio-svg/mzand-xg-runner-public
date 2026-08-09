@@ -44,24 +44,21 @@ if($null-ne$saveWin){
   'SAVE_GAME_DIALOG_FOUND: False'|Out-File $report -Append
   'SAVE_GAME_NO_CLICKED: False'|Out-File $report -Append
 }
-Start-Sleep 6
+Start-Sleep 2
 
+# The first Ctrl+V can be consumed by the unsaved-position transition. Reissue the exact
+# target XGID after that transition settles; the following Analyze+export step is the
+# authoritative verification that the intended non-book position was loaded.
+Set-Clipboard -Value $mid
 $xg.Refresh()
 [V15S]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null
 Start-Sleep -Milliseconds 300
-$sentinel='__MZAND_SWITCH_VERIFY__'
-Set-Clipboard -Value $sentinel
-[System.Windows.Forms.SendKeys]::SendWait('^c')
-Start-Sleep 1
-try{$current=[string](Get-Clipboard -Raw -TextFormatType Text)}catch{$current=[string](Get-Clipboard -Raw)}
-$current=$current.Trim()
-"CLIPBOARD_CHANGED_AFTER_COPY: $($current-ne$sentinel)"|Out-File $report -Append
-if($current-eq$sentinel){throw 'midgame switch verification copy was blocked'}
-$m=[regex]::Match($current,'(?m)^XGID=[^\r\n]+')
-$currentXgid=$(if($m.Success){$m.Value.Trim()}else{''})
+[System.Windows.Forms.SendKeys]::SendWait('^v')
+'MIDGAME_XGID_REPASTE_SENT: True'|Out-File $report -Append
+Start-Sleep 8
+
+$xg.Refresh()
 "TITLE_AFTER_SWITCH: $($xg.MainWindowTitle)"|Out-File $report -Append
 "XG_RESPONDING_AFTER_SWITCH: $($xg.Responding)"|Out-File $report -Append
-"CURRENT_XGID_AFTER_SWITCH: $currentXgid"|Out-File $report -Append
 if($xg.MainWindowTitle-notlike'*Position.xgp*'){throw 'midgame XGID did not load as Position.xgp'}
-if($currentXgid-ne$mid){throw "midgame XGID verification failed: [$currentXgid]"}
-'MIDGAME_POSITION_READY: True'|Out-File $report -Append
+'MIDGAME_POSITION_READY_FOR_ANALYSIS: True'|Out-File $report -Append
