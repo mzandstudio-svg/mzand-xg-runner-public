@@ -2,8 +2,9 @@ $ErrorActionPreference='Stop'
 $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-parallel-candidate-rollout-v16.ps1'
 $src=Get-Content $srcPath -Raw
 
-# Non-book positions can take materially longer than opening-book positions to finish
-# Analyze Position. Replace the fixed 15-second assumption with export-based readiness.
+# Non-book XGID imports can retain an unsaved game shell. Analyze -> Position then
+# raises a modal Save Game prompt. Dismiss it explicitly with No before waiting for
+# analyzed-candidate export. Opening-book Position.xgp controls do not always show it.
 $oldAnalysis=@'
 Start-Sleep 15
 Post "$prefix/analyzed" 'success' 'Analyze Position completed for candidate selection'
@@ -12,6 +13,43 @@ $baselineText=ExportText $xg
 $baseline=ParseExport $baselineText "$prefix-baseline"
 '@
 $newAnalysis=@'
+$root=[System.Windows.Automation.AutomationElement]::RootElement
+$savePromptSeen=$false
+$savePromptDismissed=$false
+for($saveWait=0;$saveWait-lt20;$saveWait++){
+  Start-Sleep -Milliseconds 500
+  $allUi=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+  $saveDialogs=@()
+  foreach($e in $allUi){
+    try{
+      if($e.Current.ProcessId-eq$xg.Id -and $e.Current.Name-eq'Save Game' -and -not$e.Current.IsOffscreen){$saveDialogs+=,$e}
+    }catch{}
+  }
+  if($saveDialogs.Count-gt1){Shot "$prefix-save-prompt-ambiguous";throw "Expected at most one Save Game dialog, got $($saveDialogs.Count)"}
+  if($saveDialogs.Count-eq1){
+    $savePromptSeen=$true
+    $dlg=$saveDialogs[0]
+    $children=$dlg.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+    $noButtons=@()
+    foreach($e in $children){
+      try{
+        if($e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button -and $e.Current.Name-eq'No' -and $e.Current.IsEnabled){$noButtons+=,$e}
+      }catch{}
+    }
+    if($noButtons.Count-ne1){Shot "$prefix-save-prompt-no-mismatch";throw "Expected one enabled No button in Save Game dialog, got $($noButtons.Count)"}
+    $nr=$noButtons[0].Current.BoundingRectangle
+    Shot "$prefix-save-prompt-before-no"
+    LeftClick ([int]($nr.X+$nr.Width/2)) ([int]($nr.Y+$nr.Height/2))
+    $savePromptDismissed=$true
+    "SAVE_GAME_PROMPT_NO_CLICKED: True"|Out-File $report -Append
+    Post "$prefix/save-prompt" 'success' 'Unsaved-game Save Game prompt dismissed with No'
+    Start-Sleep -Milliseconds 700
+    break
+  }
+}
+"SAVE_GAME_PROMPT_SEEN: $savePromptSeen"|Out-File $report -Append
+"SAVE_GAME_PROMPT_DISMISSED: $savePromptDismissed"|Out-File $report -Append
+
 $baselineText=''
 $analysisReady=$false
 $analysisElapsed=0
