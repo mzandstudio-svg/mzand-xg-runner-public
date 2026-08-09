@@ -48,23 +48,28 @@ function InvokeAnalyzePosition(){
   ClickXY ([int](($pos.Left+$pos.Right)/2)) ([int](($pos.Top+$pos.Bottom)/2))
 }
 function DismissDelayedSaveGame(){
-  Start-Sleep 2
-  $root=[System.Windows.Automation.AutomationElement]::RootElement
-  $all=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
-  foreach($w in $all){
-    try{
-      if($w.Current.ProcessId-eq$xg.Id -and $w.Current.Name-eq'Save Game'){
-        $buttons=$w.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-        foreach($b in $buttons){
-          if($b.Current.Name-eq'No' -and $b.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button){
-            $p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-            ([System.Windows.Automation.InvokePattern]$p).Invoke()
-            Start-Sleep 1
-            return $true
+  $deadline=(Get-Date).AddSeconds(30)
+  while((Get-Date)-lt$deadline){
+    $root=[System.Windows.Automation.AutomationElement]::RootElement
+    $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+    foreach($w in $all){
+      try{
+        if($w.Current.ProcessId-ne$xg.Id){continue}
+        $name=[string]$w.Current.Name
+        if($name-eq'Save Game'){
+          $buttons=$w.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+          foreach($b in $buttons){
+            if($b.Current.Name-eq'No' -and $b.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button){
+              $p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+              ([System.Windows.Automation.InvokePattern]$p).Invoke()
+              Start-Sleep 2
+              return $true
+            }
           }
         }
-      }
-    }catch{}
+      }catch{}
+    }
+    Start-Sleep -Milliseconds 500
   }
   return $false
 }
