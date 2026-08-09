@@ -1,0 +1,61 @@
+name: XG Development Coverage Corpus Audit
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-development-coverage-audit.yml
+      - scripts/aggregate_coverage_corpus.py
+      - references/xg-v*-coverage.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  audit-development-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Aggregate frozen non-pristine coverage audits
+        run: |
+          python scripts/aggregate_coverage_corpus.py references xg-development-coverage-summary.json | tee xg-development-coverage-summary.txt
+
+      - name: Upload development coverage corpus audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-development-coverage-corpus
+          path: |
+            xg-development-coverage-summary.json
+            xg-development-coverage-summary.txt
+          retention-days: 30
+
+      - name: Publish audit status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          d=json.load(open('xg-development-coverage-summary.json'))
+          desc=(f"dev-only top1={d['development_top1_accuracy']:.3f}; "
+                f"decisive-pairs={d['decisive_pair_correct']}/{d['decisive_pair_count']}; "
+                f"hard={d['hard_position_count']}")
+          payload=json.dumps({'state':'success','context':'xg-dev/coverage-audit','description':desc}).encode()
+          req=urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",
+              data=payload,
+              method='POST',
+              headers={
+                  'Authorization':f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept':'application/vnd.github+json',
+                  'X-GitHub-Api-Version':'2022-11-28',
+                  'Content-Type':'application/json',
+              },
+          )
+          urllib.request.urlopen(req).read()
+          PY
