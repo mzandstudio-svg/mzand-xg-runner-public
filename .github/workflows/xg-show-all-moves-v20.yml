@@ -1,4 +1,4 @@
-name: XG Show All Moves Coverage v20
+name: XG Show All Moves Coverage v20b
 
 on:
   push:
@@ -16,7 +16,22 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post 'xg-v20/runner-start' 'pending' 'Show all Moves Windows runner started'
+          Post "xg-v20/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+
       - uses: actions/checkout@v4
+
       - name: Install XG
         shell: powershell
         run: |
@@ -27,12 +42,15 @@ jobs:
           $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
           if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
           "xgexe=C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe"|Out-File $env:GITHUB_ENV -Append
+
       - name: Reach proven XGID
         shell: powershell
         run: ./scripts/xg-reach-xgid.ps1
+
       - name: Show all moves and export
         shell: powershell
         run: ./scripts/xg-show-all-moves-v20.ps1
+
       - name: Upload coverage evidence
         if: always()
         uses: actions/upload-artifact@v7
@@ -47,3 +65,20 @@ jobs:
             xg-v20-*.png
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Publish final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          $state=$(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})
+          Post 'xg-v20/job' $state "job=$env:JOB_STATUS"
+          Post 'xg-v20/runner-start' 'success' 'runner reached final status'
