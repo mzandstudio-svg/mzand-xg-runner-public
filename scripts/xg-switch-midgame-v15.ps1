@@ -23,11 +23,10 @@ if($clip-ne$mid){throw 'midgame clipboard verification failed'}
 [V15S]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null
 Start-Sleep -Milliseconds 300
 [System.Windows.Forms.SendKeys]::SendWait('^v')
-Start-Sleep 2
 
 $root=[System.Windows.Automation.AutomationElement]::RootElement
 $saveWin=$null
-for($i=0;$i-lt20 -and $null-eq$saveWin;$i++){
+for($i=0;$i-lt48 -and $null-eq$saveWin;$i++){
   $wins=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
   foreach($w in $wins){
     try{if($w.Current.ProcessId-eq$xg.Id -and $w.Current.Name-eq'Save Game'){$saveWin=$w;break}}catch{}
@@ -41,18 +40,23 @@ if($null-ne$saveWin){
   $invoke.Invoke()
   'SAVE_GAME_DIALOG_FOUND: True'|Out-File $report -Append
   'SAVE_GAME_NO_CLICKED: True'|Out-File $report -Append
-  Start-Sleep 5
 }else{
   'SAVE_GAME_DIALOG_FOUND: False'|Out-File $report -Append
   'SAVE_GAME_NO_CLICKED: False'|Out-File $report -Append
 }
+Start-Sleep 6
 
 $xg.Refresh()
 [V15S]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null
 Start-Sleep -Milliseconds 300
+$sentinel='__MZAND_SWITCH_VERIFY__'
+Set-Clipboard -Value $sentinel
 [System.Windows.Forms.SendKeys]::SendWait('^c')
 Start-Sleep 1
 try{$current=[string](Get-Clipboard -Raw -TextFormatType Text)}catch{$current=[string](Get-Clipboard -Raw)}
+$current=$current.Trim()
+"CLIPBOARD_CHANGED_AFTER_COPY: $($current-ne$sentinel)"|Out-File $report -Append
+if($current-eq$sentinel){throw 'midgame switch verification copy was blocked'}
 $m=[regex]::Match($current,'(?m)^XGID=[^\r\n]+')
 $currentXgid=$(if($m.Success){$m.Value.Trim()}else{''})
 "TITLE_AFTER_SWITCH: $($xg.MainWindowTitle)"|Out-File $report -Append
