@@ -1,0 +1,110 @@
+name: XG Structured Label Public v14
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/xg-structured-label-public-v14.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  structured-label:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
+          Post 'xg-public-v14/runner-start' 'pending' 'Public Windows runner started v14'
+          Post "xg-public-v14/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        continue-on-error: true
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-analyze-win32-v3.ps1
+
+      - name: Analyze and export position text
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-export-clipboard-v13.ps1
+
+      - name: Parse structured training label
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python ./scripts/parse_xg_position_export.py ./xg-v13-position-clipboard.txt ./xg-v14-label.json
+          $data=Get-Content ./xg-v14-label.json -Raw|ConvertFrom-Json
+          if($data.schema-ne'mzand.xg.position-label.v1'){throw 'schema mismatch'}
+          if($data.candidate_count-lt1){throw 'candidate_count < 1'}
+          if($data.candidates[0].move-ne'24/23 13/8'){throw "unexpected best move $($data.candidates[0].move)"}
+          if([math]::Abs([double]$data.candidates[0].equity-0.900)-gt0.001){throw 'unexpected best equity'}
+          "SCHEMA: $($data.schema)"|Out-File ./xg-v14-validation.txt
+          "CANDIDATE_COUNT: $($data.candidate_count)"|Out-File ./xg-v14-validation.txt -Append
+          "BEST_MOVE: $($data.candidates[0].move)"|Out-File ./xg-v14-validation.txt -Append
+          "BEST_EQUITY: $($data.candidates[0].equity)"|Out-File ./xg-v14-validation.txt -Append
+          "BEST_METHOD: $($data.candidates[0].analysis_method)"|Out-File ./xg-v14-validation.txt -Append
+          "BEST_WIN: $($data.candidates[0].player.win)"|Out-File ./xg-v14-validation.txt -Append
+          "BEST_GAMMON: $($data.candidates[0].player.gammon)"|Out-File ./xg-v14-validation.txt -Append
+          "BEST_BACKGAMMON: $($data.candidates[0].player.backgammon)"|Out-File ./xg-v14-validation.txt -Append
+
+      - name: Upload v14 structured label
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-structured-label-public-v14
+          path: |
+            xg-v13-position-clipboard.txt
+            xg-v13-report.txt
+            xg-v14-label.json
+            xg-v14-validation.txt
+            xg-v8-position-analysis-20s.png
+            xg-install.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish final gates
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[bool]$ok,[string]$description){$state=if($ok){'success'}else{'failure'};$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
+          $raw=Test-Path ./xg-v13-position-clipboard.txt
+          $json=Test-Path ./xg-v14-label.json
+          $valid=Test-Path ./xg-v14-validation.txt
+          Post 'xg-public-v14/raw-export' $raw "raw XG position export present=$raw"
+          Post 'xg-public-v14/json-label' $json "structured JSON label present=$json"
+          Post 'xg-public-v14/validated' $valid "structured label validation present=$valid"
+          Post 'xg-public-v14/runner-start' $true 'runner reached final status'
