@@ -1,0 +1,95 @@
+name: XG Analyze Level Public v3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/xg-analyze-level-public-v3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Publish runner-start status
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $payload=@{state='pending';context='xg-public-v3/runner-start';description='Public Windows runner started v3'}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Run Win32 Analyze probe
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-analyze-win32-v3.ps1
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-analyze-level-public-v3
+          path: |
+            xg-install.log
+            xg-public-v3-report.txt
+            xg-win32-top-menu.txt
+            xg-win32-analyze-menu.txt
+            xg-win32-set-level-top-windows.txt
+            xg-*.png
+            xg-*-ui.txt
+            xg-*-processes.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish final statuses
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          PRIOR_JOB_STATUS: ${{ job.status }}
+        run: |
+          function Post-Gate([string]$context,[bool]$ok,[string]$description){
+            $state=if($ok){'success'}else{'failure'}
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post-Gate 'xg-public-v3/runner-start' $true "runner reached final gate; prior=$env:PRIOR_JOB_STATUS"
+          $report="$env:GITHUB_WORKSPACE\xg-public-v3-report.txt"
+          if(Test-Path $report){
+            $text=Get-Content $report -Raw
+            Post-Gate 'xg-public-v3/xgid' ($text-match'XGID_CLIPBOARD_MATCH: True' -and $text-match'TITLE_AFTER_IMPORT: .*Position\.xgp\*') 'known XGID gate'
+            Post-Gate 'xg-public-v3/win32-menu' ($text-match'WIN32_SET_ANALYZE_LEVEL_INDEX: [0-9]+') 'exact Set Analyze Level gate'
+            Post-Gate 'xg-public-v3/dialog' ($text-match'SET_ANALYZE_LEVEL_COMMAND_SENT: True' -and $text-match'ANALYZE_FRONTIER_CAPTURED: True') 'dialog capture gate'
+          }else{
+            Post-Gate 'xg-public-v3/xgid' $false 'report missing'
+            Post-Gate 'xg-public-v3/win32-menu' $false 'report missing'
+            Post-Gate 'xg-public-v3/dialog' $false 'report missing'
+          }
+          Post-Gate 'xg-public-v3/job' ($env:PRIOR_JOB_STATUS-eq'success') "job status before final gate=$env:PRIOR_JOB_STATUS"
