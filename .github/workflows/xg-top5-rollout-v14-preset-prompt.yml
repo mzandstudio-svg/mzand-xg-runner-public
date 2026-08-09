@@ -1,0 +1,206 @@
+name: XG Top5 Rollout v14 Preset Prompt
+
+on:
+  push:
+    branches: [xg-top5-rollout-start-v12]
+    paths:
+      - .github/workflows/xg-top5-rollout-v14-preset-prompt.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  preset-prompt:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post 'xg-top5-v14/runner-start' 'pending' 'Public Windows runner started'
+          Post "xg-top5-v14/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Select top five, choose 3-ply XG Roller preset, capture Start prompt
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+
+          function Stop-Process {
+            [CmdletBinding()]
+            param(
+              [Parameter(ValueFromPipeline=$true)]$InputObject,
+              [string[]]$Name,
+              [int[]]$Id,
+              [switch]$Force
+            )
+            process { }
+          }
+          . ./scripts/xg-top5-rollout-submenu-probe.ps1
+          Remove-Item Function:\Stop-Process -Force
+
+          $report="$env:GITHUB_WORKSPACE\xg-top5-v14-report.txt"
+          'XG Top5 Rollout v14 Preset Prompt'|Out-File $report
+          $xg=$script:xg
+          if($null-eq$xg -or $xg.HasExited){throw 'XG process not alive after proven helper'}
+          Post 'xg-top5-v14/top-five-ready' 'success' 'Top five selected and Rollout submenu open'
+
+          function FindLargeSubmenu([int]$pid){
+            $root=[System.Windows.Automation.AutomationElement]::RootElement
+            $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+            $hits=@()
+            foreach($e in $all){
+              try{
+                $r=$e.Current.BoundingRectangle
+                if($e.Current.ProcessId-eq$pid -and $e.Current.ClassName-eq'#32768' -and $r.Width-gt300 -and $r.Height-gt300){$hits+=,$e}
+              }catch{}
+            }
+            if($hits.Count-ne1){return $null}
+            return $hits[0]
+          }
+          function FindContextPopup([int]$pid){
+            $root=[System.Windows.Automation.AutomationElement]::RootElement
+            $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+            $hits=@()
+            foreach($e in $all){
+              try{
+                $r=$e.Current.BoundingRectangle
+                if($e.Current.ProcessId-eq$pid -and $e.Current.ClassName-eq'#32768' -and $r.Width-gt200 -and $r.Width-lt280 -and $r.Height-gt390){$hits+=,$e}
+              }catch{}
+            }
+            if($hits.Count-ne1){return $null}
+            return $hits[0]
+          }
+
+          $sub=FindLargeSubmenu $xg.Id
+          if($null-eq$sub){Shot 'xg-top5-v14-initial-submenu-missing';throw 'Initial Rollout submenu missing'}
+          $sr=$sub.Current.BoundingRectangle
+          "INITIAL_SUBMENU_RECT: $($sr.X),$($sr.Y),$($sr.Width),$($sr.Height)"|Out-File $report -Append
+
+          # Explicitly choose row 4: (Preset) Moves 3-ply, cube decisions XG Roller.
+          $presetX=[int]($sr.X+150)
+          $presetY=[int]($sr.Y+69)
+          "PRESET_3PLY_XGROLLER_CLICK: $presetX,$presetY"|Out-File $report -Append
+          LeftClick $presetX $presetY
+          Start-Sleep -Milliseconds 700
+          Post 'xg-top5-v14/preset-clicked' 'success' 'Explicitly clicked preset row 4: Moves 3-ply, cube decisions XG Roller'
+
+          # Re-open context menu on the already-selected fifth move.
+          RightClick $x $ys[4]
+          Start-Sleep -Milliseconds 700
+          $context=FindContextPopup $xg.Id
+          if($null-eq$context){Shot 'xg-top5-v14-context-missing';throw 'Context menu did not reopen'}
+          $cr=$context.Current.BoundingRectangle
+          "CONTEXT_RECT: $($cr.X),$($cr.Y),$($cr.Width),$($cr.Height)"|Out-File $report -Append
+          $rollX=[int]($cr.X+$cr.Width/2)
+          $rollY=[int]($cr.Y+221)
+          [R8N]::SetCursorPos($rollX,$rollY)|Out-Null
+          Start-Sleep 1
+          $sub2=FindLargeSubmenu $xg.Id
+          if($null-eq$sub2){Shot 'xg-top5-v14-submenu2-missing';throw 'Rollout submenu did not reopen'}
+          $sr2=$sub2.Current.BoundingRectangle
+          Shot 'xg-top5-v14-preset-selected-submenu'
+          "SECOND_SUBMENU_RECT: $($sr2.X),$($sr2.Y),$($sr2.Width),$($sr2.Height)"|Out-File $report -Append
+
+          # Start row center from proven v8/v13 geometry.
+          $startX=[int]($sr2.X+110)
+          $startY=[int]($sr2.Y+240)
+          LeftClick $startX $startY
+          'ROLLOUT_START_CLICKED: True'|Out-File $report -Append
+          Post 'xg-top5-v14/start-clicked' 'success' 'Clicked Rollout Start after explicit preset selection'
+          Start-Sleep 1
+
+          $root=[System.Windows.Automation.AutomationElement]::RootElement
+          $wins=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+          $dlg=$null;$ok=$null;$cancel=$null;$games=$null
+          foreach($e in $wins){
+            try{
+              if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ClassName-eq'TPromptRollOutDlg' -and $e.Current.Name-eq'Rollout'){$dlg=$e}
+            }catch{}
+          }
+          if($null-eq$dlg){Shot 'xg-top5-v14-prompt-missing';throw 'Rollout prompt did not appear'}
+          $desc=$dlg.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+          foreach($e in $desc){
+            try{
+              if($e.Current.Name-eq'Ok' -and $e.Current.ClassName-eq'TButton'){$ok=$e}
+              if($e.Current.Name-eq'Cancel' -and $e.Current.ClassName-eq'TButton'){$cancel=$e}
+              if($e.Current.Name-eq'1296' -and $e.Current.ClassName-eq'TSpinEditX'){$games=$e}
+            }catch{}
+          }
+          $dr=$dlg.Current.BoundingRectangle
+          "PROMPT_RECT: $($dr.X),$($dr.Y),$($dr.Width),$($dr.Height)"|Out-File $report -Append
+          "PROMPT_OK_FOUND: $($null-ne$ok)"|Out-File $report -Append
+          "PROMPT_CANCEL_FOUND: $($null-ne$cancel)"|Out-File $report -Append
+          "PROMPT_1296_FOUND: $($null-ne$games)"|Out-File $report -Append
+          if($null-eq$ok -or $null-eq$cancel -or $null-eq$games){Shot 'xg-top5-v14-prompt-signature-mismatch';throw 'Rollout prompt signature mismatch'}
+          Shot 'xg-top5-v14-rollout-prompt'
+          Post 'xg-top5-v14/prompt-captured' 'success' 'Rollout prompt captured with 1296 games; no OK click yet'
+          Get-Content $report
+          Microsoft.PowerShell.Management\Stop-Process -Name eXtremeGammon2,test3d -Force -ErrorAction SilentlyContinue
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-top5-rollout-v14-preset-prompt
+          path: |
+            xg-install.log
+            xg-reach-xgid-report.txt
+            xg-top5-v8-*.png
+            xg-top5-v8-*-ui.txt
+            xg-top5-v14-report.txt
+            xg-top5-v14-*.png
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          $ok=Test-Path "$env:GITHUB_WORKSPACE\xg-top5-v14-rollout-prompt.png"
+          Post 'xg-top5-v14/evidence' ($(if($ok){'success'}else{'failure'})) "prompt evidence=$ok"
+          Post 'xg-top5-v14/job' ($(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})) "job=$env:JOB_STATUS"
+          Post 'xg-top5-v14/runner-start' 'success' 'runner reached final status'
