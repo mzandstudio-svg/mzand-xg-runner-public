@@ -1,6 +1,8 @@
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 Add-Type @"
 using System;
 using System.Text;
@@ -135,12 +137,22 @@ $width=$wr.Right-$wr.Left;$height=$wr.Bottom-$wr.Top
 if($width-ne924 -or $height-ne668){throw "unexpected XG geometry ${width}x${height}"}
 $rowX=[int]$wr.Left+130;$rowY=[int]$wr.Top+370
 LeftClick $rowX $rowY;Start-Sleep -Milliseconds 250;RightClick $rowX $rowY;Start-Sleep -Milliseconds 700
-Shot 'xg-v22-context-before-xgrpp'
-# Geometry proven by earlier controlled XGR++ and v21 runs.
-$xgrX=[int]$wr.Left+294;$xgrY=[int]$wr.Top+499
-# Use context-relative geometry from the stable 924x668 window: menu click point is 294,499 in screen coordinates when window origin is 0,0.
-$xgrX=[int]$wr.Left+294;$xgrY=[int]$wr.Top+499
+
+$root=[System.Windows.Automation.AutomationElement]::RootElement
+$all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+$menus=@()
+foreach($e in $all){
+  try{
+    $r=$e.Current.BoundingRectangle
+    if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ClassName-eq'#32768' -and $r.Width-gt200 -and $r.Width-lt270 -and $r.Height-gt400 -and $r.Height-lt450){$menus+=,$e}
+  }catch{}
+}
+if($menus.Count-ne1){Shot 'xg-v22-context-mismatch';throw "expected one move context menu, got $($menus.Count)"}
+$cr=$menus[0].Current.BoundingRectangle
+$xgrX=[int]($cr.X+$cr.Width/2);$xgrY=[int]($cr.Y+203)
+"CONTEXT_RECT: $($cr.X),$($cr.Y),$($cr.Width),$($cr.Height)"|Out-File $report -Append
 "XGRPP_CLICK_POINT: $xgrX,$xgrY"|Out-File $report -Append
+Shot 'xg-v22-context-before-xgrpp'
 LeftClick $xgrX $xgrY
 Post 'xg-v22/xgrpp-started' 'success' 'XG Roller++ clicked for rank 1 raw export probe'
 Start-Sleep 10
