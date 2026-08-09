@@ -16,6 +16,10 @@ permissions:
   contents: read
   statuses: write
 
+concurrency:
+  group: xg-v21-midgame-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   xgrpp-candidate:
     name: midgame-xgrpp-${{ matrix.rank }}
@@ -27,6 +31,17 @@ jobs:
       matrix:
         rank: [1,2,3,4,5]
     steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
+          Post "xg-v21/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+          Post "xg-v21-candidate-$env:CANDIDATE_RANK/runner-start" 'pending' "candidate $env:CANDIDATE_RANK runner started"
+
       - uses: actions/checkout@v4
 
       - name: Install XG
@@ -75,6 +90,20 @@ jobs:
             xg-install-v21-c${{ matrix.rank }}.log
           if-no-files-found: ignore
           retention-days: 14
+
+      - name: Publish candidate final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
+          $state=if($env:JOB_STATUS-eq'success'){'success'}else{'failure'}
+          Post "xg-v21-candidate-$env:CANDIDATE_RANK/job" $state "candidate $env:CANDIDATE_RANK job=$env:JOB_STATUS"
+          Post "xg-v21-candidate-$env:CANDIDATE_RANK/runner-start" 'success' "candidate $env:CANDIDATE_RANK runner reached final status"
 
   aggregate-coverage:
     name: aggregate-midgame-xgrpp-coverage
