@@ -32,33 +32,65 @@ function TopSource([string]$text){
   if($m.Success){return $m.Groups[1].Value.Trim()}
   return ''
 }
+function InvokeAnalyzePosition(){
+  $xg.Refresh()
+  $hwnd=[IntPtr]$xg.MainWindowHandle
+  $menu=[V8N]::GetMenu($hwnd)
+  $top=New-Object V8N+RECT
+  if(-not[V8N]::GetMenuItemRect($hwnd,$menu,4,[ref]$top)){throw 'Analyze top rect failed after midgame switch'}
+  [V8N]::SetForegroundWindow($hwnd)|Out-Null
+  Start-Sleep -Milliseconds 250
+  ClickXY ([int](($top.Left+$top.Right)/2)) ([int](($top.Top+$top.Bottom)/2))
+  Start-Sleep -Milliseconds 500
+  $sub=[V8N]::GetSubMenu($menu,4)
+  $pos=New-Object V8N+RECT
+  if(-not[V8N]::GetMenuItemRect($hwnd,$sub,1,[ref]$pos)){throw 'Analyze Position row rect failed after midgame switch'}
+  ClickXY ([int](($pos.Left+$pos.Right)/2)) ([int](($pos.Top+$pos.Bottom)/2))
+}
+function DismissDelayedSaveGame(){
+  Start-Sleep 2
+  $root=[System.Windows.Automation.AutomationElement]::RootElement
+  $all=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
+  foreach($w in $all){
+    try{
+      if($w.Current.ProcessId-eq$xg.Id -and $w.Current.Name-eq'Save Game'){
+        $buttons=$w.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+        foreach($b in $buttons){
+          if($b.Current.Name-eq'No' -and $b.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button){
+            $p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            ([System.Windows.Automation.InvokePattern]$p).Invoke()
+            Start-Sleep 1
+            return $true
+          }
+        }
+      }
+    }catch{}
+  }
+  return $false
+}
 
 & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
 $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
 $xg.Refresh()
-$hwnd=[IntPtr]$xg.MainWindowHandle
-$menu=[V8N]::GetMenu($hwnd)
-$top=New-Object V8N+RECT
-if(-not[V8N]::GetMenuItemRect($hwnd,$menu,4,[ref]$top)){throw 'Analyze top rect failed after midgame switch'}
-[V8N]::SetForegroundWindow($hwnd)|Out-Null
-Start-Sleep -Milliseconds 250
-ClickXY ([int](($top.Left+$top.Right)/2)) ([int](($top.Top+$top.Bottom)/2))
-Start-Sleep -Milliseconds 500
-$sub=[V8N]::GetSubMenu($menu,4)
-$pos=New-Object V8N+RECT
-if(-not[V8N]::GetMenuItemRect($hwnd,$sub,1,[ref]$pos)){throw 'Analyze Position row rect failed after midgame switch'}
-ClickXY ([int](($pos.Left+$pos.Right)/2)) ([int](($pos.Top+$pos.Bottom)/2))
+InvokeAnalyzePosition
 Post 'xg-public-v15/midgame-analyze-started' 'success' 'Analyze Position clicked for non-book midgame control'
+$saveDismissed=DismissDelayedSaveGame
+if($saveDismissed){
+  Post 'xg-public-v15/delayed-save-dismissed' 'success' 'Delayed Save Game prompt dismissed with No'
+  InvokeAnalyzePosition
+  Post 'xg-public-v15/midgame-analyze-reissued' 'success' 'Analyze Position reissued after delayed Save Game prompt'
+}
 Start-Sleep 20
 Shot "$env:GITHUB_WORKSPACE\xg-v15-midgame-analysis.png"
 
 $xg.Refresh()
 $hwnd=[IntPtr]$xg.MainWindowHandle
 $report15="$env:GITHUB_WORKSPACE\xg-v15-xgrpp-report.txt"
+"DELAYED_SAVE_GAME_DISMISSED: $saveDismissed"|Out-File $report15
 $baseline=ExportText
 Set-Content "$env:GITHUB_WORKSPACE\xg-v15-before-xgrpp.txt" $baseline -Encoding UTF8
 $beforeSource=TopSource $baseline
-"TOP_SOURCE_BEFORE_XGRPP: $beforeSource"|Out-File $report15
+"TOP_SOURCE_BEFORE_XGRPP: $beforeSource"|Out-File $report15 -Append
 "BASELINE_CLIPBOARD_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
 if(-not$beforeSource){throw 'Could not parse baseline top candidate source'}
 if($beforeSource-like'Book*'){throw "Midgame control unexpectedly hit Book source [$beforeSource]"}
