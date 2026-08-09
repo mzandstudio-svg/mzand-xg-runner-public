@@ -7,7 +7,7 @@ $prefix=$src.Substring(0,$idx)
 $tail=@'
 
 $xg.Refresh()
-[N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null
+[V8N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null
 Start-Sleep -Milliseconds 300
 [System.Windows.Forms.SendKeys]::SendWait('^c')
 Start-Sleep 1
