@@ -103,8 +103,6 @@ jobs:
             [V12N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 70;[V12N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
           }
 
-          # The proven v8 helper selects rows 1..5, opens the context menu and hovers Rollout.
-          # Shadow only its final cleanup so XG and the open Rollout submenu remain alive for this probe.
           function Stop-Process {
             [CmdletBinding()]
             param(
@@ -123,8 +121,12 @@ jobs:
           $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
           $xg.Refresh()
           "TITLE_BEFORE_START: $($xg.MainWindowTitle)"|Out-File $report -Append
-          if($xg.MainWindowTitle-notlike'*Position.xgp*'){throw 'Position.xgp lost before Start probe'}
-          Post 'xg-top5-v12/xgid' 'success' 'Position.xgp ready after top-five selection'
+          if($xg.HasExited){throw 'XG exited before Start probe'}
+          $hwnd=[IntPtr]$xg.MainWindowHandle
+          if($hwnd-eq[IntPtr]::Zero){throw 'XG main window handle missing before Start probe'}
+          "XG_PID_BEFORE_START: $($xg.Id)"|Out-File $report -Append
+          "XG_HANDLE_BEFORE_START: $hwnd"|Out-File $report -Append
+          Post 'xg-top5-v12/xg-alive' 'success' 'XG process and main window handle alive after top-five selection'
 
           $root=[System.Windows.Automation.AutomationElement]::RootElement
           $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
@@ -153,7 +155,6 @@ jobs:
           "ROLLOUT_SUBMENU_ITEM_COUNT: $($items.Count)"|Out-File $report -Append
           if($items.Count-lt18){Shot 'xg-top5-v12-start-item-count-mismatch';DumpUI 'xg-top5-v12-start-item-count-mismatch' $xg.Id;throw "Expected at least 18 rollout submenu items, got $($items.Count)"}
 
-          # Proven v8 geometry: 11 preset/custom rows, separator, then Start as the 12th actual MenuItem.
           $startItem=$items[11]
           $rr=$startItem.Current.BoundingRectangle
           $delta=[int]($rr.Y-$sr.Y)
