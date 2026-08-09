@@ -1,0 +1,179 @@
+name: XG Top5 Rollout v6 Position Analysis
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/xg-top5-rollout-v6-position-analysis.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  position-analysis:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post 'xg-top5-v6/runner-start' 'pending' 'Public Windows runner started'
+          Post "xg-top5-v6/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Analyze current position and capture move list
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Top5N {
+            [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr hMenu, int nPos);
+            [DllImport("user32.dll")] public static extern uint GetMenuItemID(IntPtr hMenu, int nPos);
+            [DllImport("user32.dll")] public static extern int GetMenuItemCount(IntPtr hMenu);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+          }
+          "@
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          function Shot([string]$name){
+            $b=[System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height
+            $g=[System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size)
+            $bmp.Save("$env:GITHUB_WORKSPACE\$name.png",[System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose();$bmp.Dispose()
+          }
+          function DumpUI([string]$name){
+            $root=[System.Windows.Automation.AutomationElement]::RootElement
+            $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+            $lines=New-Object 'System.Collections.Generic.List[string]'
+            foreach($e in $all){
+              try{
+                if($e.Current.ProcessId -eq $script:xg.Id){
+                  $r=$e.Current.BoundingRectangle
+                  $lines.Add("Name=[$($e.Current.Name)] Type=[$($e.Current.ControlType.ProgrammaticName)] Class=[$($e.Current.ClassName)] Id=[$($e.Current.AutomationId)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]")
+                }
+              }catch{}
+            }
+            $lines|Out-File "$env:GITHUB_WORKSPACE\$name-ui.txt" -Encoding utf8
+          }
+
+          $report="$env:GITHUB_WORKSPACE\xg-top5-v6-report.txt"
+          'XG Top5 Rollout v6 Position Analysis'|Out-File $report
+          $script:xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+          $script:xg.Refresh()
+          "TITLE_BEFORE_POSITION_ANALYSIS: $($script:xg.MainWindowTitle)"|Out-File $report -Append
+          if($script:xg.MainWindowTitle-notlike'*Position.xgp*'){throw 'Position.xgp not ready'}
+          Post 'xg-top5-v6/xgid' 'success' 'Known XGID loaded as Position.xgp'
+
+          $hwnd=[IntPtr]$script:xg.MainWindowHandle
+          $main=[Top5N]::GetMenu($hwnd)
+          if($main-eq[IntPtr]::Zero){throw 'Main menu handle missing'}
+          $analyze=[Top5N]::GetSubMenu($main,4)
+          if($analyze-eq[IntPtr]::Zero){throw 'Analyze submenu index 4 missing'}
+          $count=[Top5N]::GetMenuItemCount($analyze)
+          $positionId=[Top5N]::GetMenuItemID($analyze,1)
+          "ANALYZE_SUBMENU_COUNT: $count"|Out-File $report -Append
+          "POSITION_MENU_INDEX: 1"|Out-File $report -Append
+          "POSITION_COMMAND_ID: $positionId"|Out-File $report -Append
+          if($positionId-eq[uint32]0xFFFFFFFF){throw 'Analyze Position has no command id'}
+          [Top5N]::SetForegroundWindow($hwnd)|Out-Null
+          Start-Sleep -Milliseconds 250
+          [void][Top5N]::SendMessage($hwnd,0x0111,[IntPtr]([int]$positionId),[IntPtr]::Zero)
+          'ANALYZE_POSITION_COMMAND_SENT: True'|Out-File $report -Append
+          Post 'xg-top5-v6/position-command' 'success' "Analyze Position command id=$positionId sent"
+
+          Start-Sleep 3
+          $script:xg.Refresh()
+          "RESPONDING_3S: $($script:xg.Responding)"|Out-File $report -Append
+          Shot 'xg-top5-v6-position-3s';DumpUI 'xg-top5-v6-position-3s'
+          Start-Sleep 9
+          $script:xg.Refresh()
+          "RESPONDING_12S: $($script:xg.Responding)"|Out-File $report -Append
+          Shot 'xg-top5-v6-position-12s';DumpUI 'xg-top5-v6-position-12s'
+          Start-Sleep 18
+          $script:xg.Refresh()
+          "RESPONDING_30S: $($script:xg.Responding)"|Out-File $report -Append
+          "TITLE_AFTER_POSITION_ANALYSIS: $($script:xg.MainWindowTitle)"|Out-File $report -Append
+          Shot 'xg-top5-v6-position-30s';DumpUI 'xg-top5-v6-position-30s'
+          'POSITION_ANALYSIS_CAPTURED: True'|Out-File $report -Append
+          Post 'xg-top5-v6/captured' 'success' 'Position analysis screenshots and UI dumps captured'
+          Get-Content $report
+          Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-top5-rollout-v6-position-analysis
+          path: |
+            xg-install.log
+            xg-reach-xgid-report.txt
+            xg-top5-v6-report.txt
+            xg-top5-v6-*.png
+            xg-top5-v6-*-ui.txt
+            xg-*.png
+            xg-*-processes.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          $ok=Test-Path "$env:GITHUB_WORKSPACE\xg-top5-v6-position-30s.png"
+          Post 'xg-top5-v6/evidence' ($(if($ok){'success'}else{'failure'})) "30s evidence captured=$ok"
+          Post 'xg-top5-v6/job' ($(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})) "job=$env:JOB_STATUS"
+          Post 'xg-top5-v6/runner-start' 'success' 'runner reached final status'
