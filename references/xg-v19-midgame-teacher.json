@@ -1,0 +1,27 @@
+{
+  "schema": "mzand.xg.teacher-label.v2",
+  "xgid": "XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10",
+  "xgid_payload": "-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10",
+  "score": {"x": 16, "o": 6, "match_length": 19},
+  "cube": 2,
+  "on_roll": "X",
+  "dice": [6, 4],
+  "xg_version": "2.10, MET: Kazaross XG2",
+  "teacher": {
+    "candidate_generation": "XG Analyze Position Top-5",
+    "label_method": "Independent 1296-game rollout per candidate",
+    "checker_preset": "Moves 3-ply",
+    "cube_preset": "XG Roller",
+    "variance_reduction": true
+  },
+  "candidate_count": 5,
+  "best_move": "13/7 8/4",
+  "best_equity": -0.547,
+  "candidates": [
+    {"move":"13/7 8/4","equity":-0.547,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":1,"rollout_games":1296,"rollout_rank":1},
+    {"move":"8/2 6/2","equity":-0.617,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":2,"rollout_games":1296,"rollout_rank":2},
+    {"move":"13/3","equity":-0.623,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":3,"rollout_games":1296,"rollout_rank":3},
+    {"move":"13/7 11/7","equity":-0.682,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":4,"rollout_games":1296,"rollout_rank":4},
+    {"move":"13/7 6/2","equity":-0.699,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":5,"rollout_games":1296,"rollout_rank":5}
+  ]
+}
