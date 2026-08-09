@@ -1,0 +1,140 @@
+name: XG Analyze Level Public v5 Open Menu
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/xg-analyze-level-public-v5-open-menu.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post 'xg-public-v5/runner-start' 'pending' 'Public Windows runner started v5'
+          Post "xg-public-v5/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        continue-on-error: true
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-analyze-win32-v3.ps1
+
+      - name: Click Win32 top menu index 4 and capture dropdown
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class V5N {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
+            [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern bool GetMenuItemRect(IntPtr hWnd, IntPtr hMenu, uint uItem, out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
+          }
+          "@
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+          $xg.Refresh()
+          if($xg.MainWindowTitle-notlike'*Position.xgp*'){throw "Expected Position.xgp, got [$($xg.MainWindowTitle)]"}
+          Post 'xg-public-v5/xgid' 'success' 'Position.xgp ready'
+          $hwnd=[IntPtr]$xg.MainWindowHandle
+          $menu=[V5N]::GetMenu($hwnd)
+          if($menu-eq[IntPtr]::Zero){throw 'GetMenu returned zero'}
+          $r=New-Object V5N+RECT
+          if(-not[V5N]::GetMenuItemRect($hwnd,$menu,4,[ref]$r)){throw 'GetMenuItemRect index 4 failed'}
+          "ANALYZE_TOP_RECT: $($r.Left),$($r.Top),$($r.Right),$($r.Bottom)"|Out-File "$env:GITHUB_WORKSPACE\xg-v5-report.txt"
+          [V5N]::SetForegroundWindow($hwnd)|Out-Null
+          Start-Sleep -Milliseconds 250
+          $cx=[int](($r.Left+$r.Right)/2);$cy=[int](($r.Top+$r.Bottom)/2)
+          [V5N]::SetCursorPos($cx,$cy)|Out-Null
+          Start-Sleep -Milliseconds 150
+          [V5N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 80;[V5N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+          Start-Sleep 1
+          $b=[System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height
+          $g=[System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size)
+          $bmp.Save("$env:GITHUB_WORKSPACE\xg-v5-analyze-menu-open.png",[System.Drawing.Imaging.ImageFormat]::Png)
+          $g.Dispose();$bmp.Dispose()
+          'ANALYZE_TOP_INDEX4_CLICKED: True'|Out-File "$env:GITHUB_WORKSPACE\xg-v5-report.txt" -Append
+          Post 'xg-public-v5/menu-open-captured' 'success' 'Analyze top menu index 4 clicked and screenshot captured'
+          Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Upload v5 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-analyze-level-public-v5-open-menu
+          path: |
+            xg-install.log
+            xg-public-v3-report.txt
+            xg-v5-report.txt
+            xg-v5-analyze-menu-open.png
+            xg-*.png
+            xg-*-ui.txt
+            xg-*-processes.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $ok=Test-Path "$env:GITHUB_WORKSPACE\xg-v5-analyze-menu-open.png"
+          $state=if($ok){'success'}else{'failure'}
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          $payload=@{state=$state;context='xg-public-v5/artifact';description="Analyze dropdown artifact captured=$ok"}|ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          $payload=@{state='success';context='xg-public-v5/runner-start';description='runner reached final status'}|ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
