@@ -8,6 +8,7 @@ on:
       - scripts/xg-parallel-candidate-xgrpp-v21.ps1
       - scripts/xg-parallel-candidate-xgrpp-v18.ps1
       - scripts/xg-switch-midgame-v15.ps1
+      - scripts/parse_xg_position_export.py
       - scripts/aggregate_xgrpp_vs_teacher.py
       - references/xg-v19-midgame-teacher.json
   workflow_dispatch:
