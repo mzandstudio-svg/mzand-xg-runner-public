@@ -10,28 +10,51 @@ $baseline=ParseExport $baselineText "$prefix-baseline"
 $new=@'
 Add-Type @"
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
 public static class V21Save {
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string className, string windowName);
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
+  public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr lParam);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder text, int maxCount);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+  static string Text(IntPtr hWnd) { var b=new StringBuilder(512); GetWindowText(hWnd,b,b.Capacity); return b.ToString(); }
+  static string ClassName(IntPtr hWnd) { var b=new StringBuilder(256); GetClassName(hWnd,b,b.Capacity); return b.ToString(); }
+  public static IntPtr FindExact(string text) {
+    IntPtr found=IntPtr.Zero;
+    EnumProc top=(h,l)=> {
+      if(Text(h)==text){found=h;return false;}
+      EnumProc child=(c,cl)=> { if(Text(c)==text){found=c;return false;} return true; };
+      EnumChildWindows(h,child,IntPtr.Zero);
+      return found==IntPtr.Zero;
+    };
+    EnumWindows(top,IntPtr.Zero);
+    return found;
+  }
+  public static IntPtr FindButtonExact(IntPtr parent,string text) {
+    IntPtr found=IntPtr.Zero;
+    EnumProc child=(h,l)=> { if(Text(h)==text && ClassName(h)=="Button"){found=h;return false;} return true; };
+    EnumChildWindows(parent,child,IntPtr.Zero);
+    return found;
+  }
 }
 "@
 function DismissSaveGameNow(){
-  $dialog=[V21Save]::FindWindow($null,'Save Game')
+  $dialog=[V21Save]::FindExact('Save Game')
   if($dialog-eq[IntPtr]::Zero){return $false}
-  $noButton=[V21Save]::FindWindowEx($dialog,[IntPtr]::Zero,'Button','No')
+  $noButton=[V21Save]::FindButtonExact($dialog,'No')
   if($noButton-ne[IntPtr]::Zero){
     [V21Save]::SendMessage($noButton,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
     Start-Sleep -Milliseconds 900
-    if([V21Save]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero){return $true}
+    if([V21Save]::FindExact('Save Game')-eq[IntPtr]::Zero){return $true}
   }
   [V21Save]::SetForegroundWindow($dialog)|Out-Null
   Start-Sleep -Milliseconds 200
   [System.Windows.Forms.SendKeys]::SendWait('%n')
   Start-Sleep -Milliseconds 900
-  return ([V21Save]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero)
+  return ([V21Save]::FindExact('Save Game')-eq[IntPtr]::Zero)
 }
 function ReissueMidgameAnalysis(){
   $mid='XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10'
@@ -55,6 +78,7 @@ while($analysisElapsed-lt240 -and -not$analysisReady){
   if(DismissSaveGameNow){
     $savePromptSeen=$true;$savePromptDismissed=$true;$reissueCount++
     "SAVE_GAME_PROMPT_DISMISSED_AT_SECONDS: $analysisElapsed"|Out-File $report -Append
+    Post "$prefix/save-dismissed" 'success' "Save Game dismissed at ${analysisElapsed}s"
     if($reissueCount-gt3){Shot "$prefix-save-prompt-loop";throw 'Save Game prompt repeated more than three times'}
     ReissueMidgameAnalysis
     "ANALYZE_REISSUED_AFTER_SAVE_PROMPT: $reissueCount"|Out-File $report -Append
