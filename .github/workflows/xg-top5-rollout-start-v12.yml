@@ -1,0 +1,230 @@
+name: XG Top5 Rollout v12 Start Probe
+
+on:
+  push:
+    branches: [xg-top5-rollout-start-v12]
+    paths:
+      - .github/workflows/xg-top5-rollout-start-v12.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  rollout-start-probe:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post 'xg-top5-v12/runner-start' 'pending' 'Public Windows runner started'
+          Post "xg-top5-v12/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Select top five, open Rollout submenu, click Start, capture next state
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class V12N {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
+          }
+          "@
+          function Post([string]$context,[string]$state,[string]$description){
+            try{
+              $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+              $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+              Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+            }catch{}
+          }
+          function Shot([string]$name){
+            $b=[System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height
+            $g=[System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size)
+            $bmp.Save("$env:GITHUB_WORKSPACE\$name.png",[System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose();$bmp.Dispose()
+          }
+          function DumpUI([string]$name,[int]$pid){
+            $root=[System.Windows.Automation.AutomationElement]::RootElement
+            $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+            $lines=New-Object 'System.Collections.Generic.List[string]'
+            foreach($e in $all){
+              try{
+                $r=$e.Current.BoundingRectangle
+                if($e.Current.ProcessId-eq$pid -or $e.Current.ClassName-eq'#32768' -or $e.Current.ClassName-eq'#32770'){
+                  $lines.Add("PID=[$($e.Current.ProcessId)] Name=[$($e.Current.Name)] Type=[$($e.Current.ControlType.ProgrammaticName)] Class=[$($e.Current.ClassName)] Id=[$($e.Current.AutomationId)] Enabled=[$($e.Current.IsEnabled)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]")
+                }
+              }catch{}
+            }
+            $lines|Out-File "$env:GITHUB_WORKSPACE\$name-ui.txt" -Encoding utf8
+          }
+          function LeftClick([int]$x,[int]$y){
+            [V12N]::SetCursorPos($x,$y)|Out-Null;Start-Sleep -Milliseconds 120
+            [V12N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 70;[V12N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+          }
+
+          # The proven v8 helper selects rows 1..5, opens the context menu and hovers Rollout.
+          # Shadow only its final cleanup so XG and the open Rollout submenu remain alive for this probe.
+          function Stop-Process {
+            [CmdletBinding()]
+            param(
+              [Parameter(ValueFromPipeline=$true)]$InputObject,
+              [string[]]$Name,
+              [int[]]$Id,
+              [switch]$Force
+            )
+            process { }
+          }
+          . ./scripts/xg-top5-rollout-submenu-probe.ps1
+          Remove-Item Function:\Stop-Process -Force
+
+          $report="$env:GITHUB_WORKSPACE\xg-top5-v12-report.txt"
+          'XG Top5 Rollout v12 Start Probe'|Out-File $report
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+          $xg.Refresh()
+          "TITLE_BEFORE_START: $($xg.MainWindowTitle)"|Out-File $report -Append
+          if($xg.MainWindowTitle-notlike'*Position.xgp*'){throw 'Position.xgp lost before Start probe'}
+          Post 'xg-top5-v12/xgid' 'success' 'Position.xgp ready after top-five selection'
+
+          $root=[System.Windows.Automation.AutomationElement]::RootElement
+          $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+          $subs=@()
+          foreach($e in $all){
+            try{
+              $r=$e.Current.BoundingRectangle
+              if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ClassName-eq'#32768' -and $r.Width-gt300 -and $r.Height-gt300){$subs+=,$e}
+            }catch{}
+          }
+          if($subs.Count-ne1){Shot 'xg-top5-v12-submenu-geometry-mismatch';DumpUI 'xg-top5-v12-submenu-geometry-mismatch' $xg.Id;throw "Expected exactly one rollout submenu, got $($subs.Count)"}
+          $sub=$subs[0];$sr=$sub.Current.BoundingRectangle
+          "ROLLOUT_SUBMENU_RECT: $($sr.X),$($sr.Y),$($sr.Width),$($sr.Height)"|Out-File $report -Append
+
+          $desc=$sub.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+          $items=@()
+          foreach($e in $desc){
+            try{
+              if($e.Current.ControlType-eq[System.Windows.Automation.ControlType]::MenuItem){
+                $r=$e.Current.BoundingRectangle
+                if($r.Width-gt250 -and $r.Height-ge15){$items+=,$e}
+              }
+            }catch{}
+          }
+          $items=@($items|Sort-Object { $_.Current.BoundingRectangle.Y })
+          "ROLLOUT_SUBMENU_ITEM_COUNT: $($items.Count)"|Out-File $report -Append
+          if($items.Count-lt18){Shot 'xg-top5-v12-start-item-count-mismatch';DumpUI 'xg-top5-v12-start-item-count-mismatch' $xg.Id;throw "Expected at least 18 rollout submenu items, got $($items.Count)"}
+
+          # Proven v8 geometry: 11 preset/custom rows, separator, then Start as the 12th actual MenuItem.
+          $startItem=$items[11]
+          $rr=$startItem.Current.BoundingRectangle
+          $delta=[int]($rr.Y-$sr.Y)
+          "START_ITEM_RECT: $($rr.X),$($rr.Y),$($rr.Width),$($rr.Height)"|Out-File $report -Append
+          "START_ITEM_Y_DELTA: $delta"|Out-File $report -Append
+          if($delta-lt220 -or $delta-gt250){Shot 'xg-top5-v12-start-geometry-mismatch';DumpUI 'xg-top5-v12-start-geometry-mismatch' $xg.Id;throw "Start row geometry mismatch delta=$delta"}
+
+          $cx=[int]($rr.X+$rr.Width/2);$cy=[int]($rr.Y+$rr.Height/2)
+          LeftClick $cx $cy
+          'ROLLOUT_START_CLICKED: True'|Out-File $report -Append
+          Post 'xg-top5-v12/start-clicked' 'success' "Rollout Start row clicked at $cx,$cy"
+
+          Start-Sleep -Milliseconds 900
+          Shot 'xg-top5-v12-after-start-1s';DumpUI 'xg-top5-v12-after-start-1s' $xg.Id
+          Start-Sleep 3
+          $xg.Refresh()
+          Shot 'xg-top5-v12-after-start-4s';DumpUI 'xg-top5-v12-after-start-4s' $xg.Id
+          "XG_RESPONDING_4S: $($xg.Responding)"|Out-File $report -Append
+          "TITLE_AFTER_START: $($xg.MainWindowTitle)"|Out-File $report -Append
+
+          $tops=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
+          $dialogs=@()
+          foreach($e in $tops){
+            try{
+              if($e.Current.ProcessId-eq$xg.Id -and [IntPtr]$e.Current.NativeWindowHandle-ne[IntPtr]$xg.MainWindowHandle){$dialogs+=,$e}
+            }catch{}
+          }
+          "POST_START_DIALOG_CANDIDATES: $($dialogs.Count)"|Out-File $report -Append
+          foreach($d in $dialogs){
+            try{
+              $r=$d.Current.BoundingRectangle
+              "DIALOG: Name=[$($d.Current.Name)] Class=[$($d.Current.ClassName)] Enabled=[$($d.Current.IsEnabled)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]"|Out-File $report -Append
+            }catch{}
+          }
+          Post 'xg-top5-v12/post-start-captured' 'success' "captured next state; dialog candidates=$($dialogs.Count)"
+          Get-Content $report
+          Microsoft.PowerShell.Management\Stop-Process -Name eXtremeGammon2,test3d -Force -ErrorAction SilentlyContinue
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-top5-rollout-v12-start-probe
+          path: |
+            xg-install.log
+            xg-reach-xgid-report.txt
+            xg-top5-v8-report.txt
+            xg-top5-v8-*.png
+            xg-top5-v8-*-ui.txt
+            xg-top5-v12-report.txt
+            xg-top5-v12-*.png
+            xg-top5-v12-*-ui.txt
+            xg-*.png
+            xg-*-processes.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          $ok=Test-Path "$env:GITHUB_WORKSPACE\xg-top5-v12-after-start-4s.png"
+          Post 'xg-top5-v12/evidence' ($(if($ok){'success'}else{'failure'})) "post-Start evidence=$ok"
+          Post 'xg-top5-v12/job' ($(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})) "job=$env:JOB_STATUS"
+          Post 'xg-top5-v12/runner-start' 'success' 'runner reached final status'
