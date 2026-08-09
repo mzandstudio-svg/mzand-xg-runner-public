@@ -1,0 +1,26 @@
+{
+  "schema": "mzand.xg.hard-position-scan-corpus.v1",
+  "scope": "non-pristine development dice variants only; not a blind benchmark",
+  "position_count": 6,
+  "non_book_position_count": 6,
+  "book_hit_count": 0,
+  "selection_rule": "smallest baseline Top-1 equity gap among non-book positions",
+  "selected_count": 3,
+  "selected_positions": [
+    {"position_id":"mid21","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:21:6:16:0:19:10","top1_gap":0.016,"best_move":"8/7 6/4","second_move":"24/23 6/4","candidate_count":5},
+    {"position_id":"mid31","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:31:6:16:0:19:10","top1_gap":0.024,"best_move":"8/4","second_move":"6/3 4/3","candidate_count":5},
+    {"position_id":"mid51","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:51:6:16:0:19:10","top1_gap":0.025,"best_move":"8/3 4/3","second_move":"24/23 13/8","candidate_count":5}
+  ],
+  "ranked_non_book_positions": [
+    {"rank":1,"position_id":"mid21","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:21:6:16:0:19:10","top1_gap":0.016,"best_move":"8/7 6/4","second_move":"24/23 6/4","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":2,"position_id":"mid31","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:31:6:16:0:19:10","top1_gap":0.024,"best_move":"8/4","second_move":"6/3 4/3","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":3,"position_id":"mid51","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:51:6:16:0:19:10","top1_gap":0.025,"best_move":"8/3 4/3","second_move":"24/23 13/8","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":4,"position_id":"mid41","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:41:6:16:0:19:10","top1_gap":0.034,"best_move":"24/23 8/4","second_move":"13/8","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":5,"position_id":"mid66","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:66:6:16:0:19:10","top1_gap":0.061,"best_move":"13/7(4)","second_move":"13/1(2)","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":6,"position_id":"mid61","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:61:6:16:0:19:10","top1_gap":0.084,"best_move":"13/7 8/7","second_move":"13/6","candidate_count":5,"analysis_elapsed_seconds":4}
+  ],
+  "book_hits": [],
+  "source_run_id": 31339587860,
+  "source_commit": "75263926c5dd8c85b41f35ab20fd0039fd820caf",
+  "source_artifact_id": 9045469912
+}
