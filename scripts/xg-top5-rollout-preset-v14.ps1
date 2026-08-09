@@ -7,8 +7,6 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class V14N {
-  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
-  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT r);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
 }
@@ -69,8 +67,16 @@ $report="$env:GITHUB_WORKSPACE\xg-top5-v14-report.txt"
 'XG Top5 Rollout v14 Explicit 3-ply XG Roller Preset'|Out-File $report
 $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
 $xg.Refresh();if($xg.HasExited){throw 'XG exited'}
-$hwnd=[IntPtr]$xg.MainWindowHandle;if($hwnd-eq[IntPtr]::Zero){throw 'XG handle missing'}
 $root=[System.Windows.Automation.AutomationElement]::RootElement
+
+# Save stable main-window geometry from UI Automation before closing the popup.
+$tops=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
+$mainWins=@()
+foreach($e in $tops){try{if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ClassName-eq'TMainX'){$mainWins+=,$e}}catch{}}
+if($mainWins.Count-ne1){throw "Expected one XG TMainX window, got $($mainWins.Count)"}
+$mr=$mainWins[0].Current.BoundingRectangle
+$rowX=[int]($mr.X+130);$row5Y=[int]($mr.Y+542)
+"MAIN_RECT: $($mr.X),$($mr.Y),$($mr.Width),$($mr.Height)"|Out-File $report -Append
 
 $subs=LargeRolloutSubmenu $root $xg.Id
 if($subs.Count-ne1){Shot 'xg-top5-v14-initial-submenu-mismatch';DumpUI 'xg-top5-v14-initial-submenu-mismatch' $xg.Id;throw "Expected initial Rollout submenu, got $($subs.Count)"}
@@ -88,9 +94,7 @@ LeftClick ([int]($pr.X+$pr.Width/2)) ([int]($pr.Y+$pr.Height/2))
 Post 'xg-top5-v14/preset-selected' 'success' 'Explicit Rollout preset Item 18 selected'
 Start-Sleep -Milliseconds 700
 
-$wr=New-Object V14N+RECT
-if(-not[V14N]::GetWindowRect($hwnd,[ref]$wr)){throw 'GetWindowRect failed'}
-$rowX=[int]$wr.Left+130;$row5Y=[int]$wr.Top+542
+# Re-open context menu using the saved XG UI geometry.
 RightClick $rowX $row5Y
 Start-Sleep -Milliseconds 700
 $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
