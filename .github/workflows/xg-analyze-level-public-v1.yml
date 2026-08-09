@@ -1,0 +1,366 @@
+name: XG Analyze Level Public v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/xg-analyze-level-public-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  inspect-analyze-level:
+    name: Proven XGID import then inspect Set Analyze Level
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Publish runner-start status
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $payload=@{state='pending';context='xg-public-v1/runner-start';description='Public Windows runner started'}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Run proven startup and capture Analyze Level
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type -AssemblyName UIAutomationClient
+          Add-Type -AssemblyName UIAutomationTypes
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class N {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out RECT r);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
+          }
+          "@
+
+          $root=[System.Windows.Automation.AutomationElement]::RootElement
+          $report="$env:GITHUB_WORKSPACE\xg-public-v1-report.txt"
+
+          function Top([string]$n){$c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$n);$root.FindFirst([System.Windows.Automation.TreeScope]::Children,$c)}
+          function DescWin([string]$n,[string]$cl,[string]$pn){$a=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$n);$b=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ClassNameProperty,$cl);$all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,(New-Object System.Windows.Automation.AndCondition($a,$b)));foreach($x in $all){try{if((Get-Process -Id $x.Current.ProcessId -ErrorAction Stop).ProcessName-eq$pn){return $x}}catch{}};return $null}
+          function FindNC($p,[string]$n,[string]$cl){if($null-eq$p){return $null};$all=$p.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition);$hits=@();foreach($x in $all){try{if([string]$x.Current.Name-eq$n -and [string]$x.Current.ClassName-eq$cl){$hits+=,$x}}catch{}};if($hits.Count-eq1){return $hits[0]};return $null}
+          function FindNIC($p,[string]$n,[string]$id,[string[]]$cls){if($null-eq$p){return $null};$all=$p.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition);foreach($x in $all){try{if([string]$x.Current.Name-eq$n -and [string]$x.Current.AutomationId-eq$id -and $cls-contains[string]$x.Current.ClassName){return $x}}catch{}};return $null}
+          function FindUniqueClass($p,[string]$cl){if($null-eq$p){return $null};$all=$p.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition);$hits=@();foreach($x in $all){try{if([string]$x.Current.ClassName-eq$cl){$hits+=,$x}}catch{}};if($hits.Count-eq1){return $hits[0]};return $null}
+          function CountBlankClass($p,[string]$cl){if($null-eq$p){return 0};$all=$p.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition);$count=0;foreach($x in $all){try{if([string]$x.Current.ClassName-eq$cl -and [string]$x.Current.Name-eq''){$count++}}catch{}};return $count}
+          function CountNC($p,[string]$n,[string]$cl){if($null-eq$p){return 0};$all=$p.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition);$count=0;foreach($x in $all){try{if([string]$x.Current.Name-eq$n -and [string]$x.Current.ClassName-eq$cl){$count++}}catch{}};return $count}
+          function HasPostText($p){if($null-eq$p){return $false};$all=$p.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition);foreach($x in $all){try{$n=[string]$x.Current.Name;if($n-like'*Thank you for running the test*' -and $n-like'*Do you want to continue*'){return $true}}catch{}};return $false}
+          function IsTest3d($w){if($null-eq$w){return $false};try{return (Get-Process -Id $w.Current.ProcessId -ErrorAction Stop).ProcessName-eq'test3d'}catch{return $false}}
+          function Click($x){if($null-eq$x){throw 'Null control'};$r=$x.Current.BoundingRectangle;if($r.Width-le0-or$r.Height-le0){throw 'Invalid bounds'};[N]::SetCursorPos([int]($r.X+$r.Width/2),[int]($r.Y+$r.Height/2))|Out-Null;Start-Sleep -Milliseconds 150;[N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 80;[N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)}
+          function English([IntPtr]$h){if($h-eq[IntPtr]::Zero){throw 'Zero language handle'};$r=New-Object N+RECT;if(-not[N]::GetWindowRect($h,[ref]$r)){throw 'GetWindowRect failed'};[N]::SetForegroundWindow($h)|Out-Null;[N]::SetCursorPos($r.Left+45,$r.Top+58)|Out-Null;Start-Sleep -Milliseconds 150;[N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 80;[N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)}
+          function Shot($p){$b=[System.Windows.Forms.SystemInformation]::VirtualScreen;$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height;$g=[System.Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size);$bmp.Save($p,[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()}
+          function Node($x,$d,$L){if($d-gt10){return};try{$r=$x.Current.BoundingRectangle;$L.Add(("  "*$d)+"PID=[$($x.Current.ProcessId)] Name=[$($x.Current.Name)] Type=[$($x.Current.ControlType.ProgrammaticName)] AutomationId=[$($x.Current.AutomationId)] Class=[$($x.Current.ClassName)] Enabled=[$($x.Current.IsEnabled)] NativeHandle=[$($x.Current.NativeWindowHandle)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]");$w=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$c=$w.GetFirstChild($x);while($null-ne$c){Node $c ($d+1) $L;$c=$w.GetNextSibling($c)}}catch{}}
+          function UI($p,$lab){$L=New-Object 'System.Collections.Generic.List[string]';$L.Add("=== $lab ===");$w=[System.Windows.Automation.TreeWalker]::ControlViewWalker;$c=$w.GetFirstChild($root);while($null-ne$c){Node $c 0 $L;$c=$w.GetNextSibling($c)};$L|Out-File $p -Encoding utf8}
+          function Procs($p){Get-Process|Where-Object{$_.ProcessName-match'extreme|test3d|gamesite|3d'-or$_.MainWindowTitle-match'Gammon|GameSite|Confirm|3D|language|Configure|Registration'}|Select-Object ProcessName,Id,Responding,MainWindowHandle,MainWindowTitle,Path|Format-List|Out-String|Out-File $p -Encoding utf8}
+          function Snap($t){Shot "$env:GITHUB_WORKSPACE\xg-$t.png";UI "$env:GITHUB_WORKSPACE\xg-$t-ui.txt" $t;Procs "$env:GITHUB_WORKSPACE\xg-$t-processes.txt"}
+
+          'XG public Analyze Level v1'|Out-File $report
+          'ANALYSIS_STARTED: False'|Out-File $report -Append
+          'XGRPP_SELECTION_CHANGED: False'|Out-File $report -Append
+          'ROLLOUT_STARTED: False'|Out-File $report -Append
+
+          $exe=$env:xgexe
+          $xg=Start-Process $exe -WorkingDirectory (Split-Path -Parent $exe) -PassThru
+          Start-Sleep 8
+          $xg.Refresh()
+          if($xg.HasExited-or$xg.MainWindowTitle-ne'Choose a language'){throw 'Initial language mismatch'}
+          English ([IntPtr]$xg.MainWindowHandle)
+          'LANGUAGE_INITIAL_ENGLISH: True'|Out-File $report -Append
+
+          $w=$null;$yes=$null;$no=$null
+          for($i=0;$i-lt40;$i++){Start-Sleep -Milliseconds 500;$w=Top 'Confirm';if($w){$yes=FindNC $w 'Yes' 'TButton';$no=FindNC $w 'No' 'TButton';if($yes-and$no-and(IsTest3d $w)-and$w.Current.ClassName-eq'TMessageForm'){break}}}
+          if(-not$yes-or-not$no){Snap 'visibility-mismatch';throw 'Visibility mismatch'}
+          Click $yes
+          'VISIBILITY_YES: True'|Out-File $report -Append
+
+          $w=$null;$ok=$null
+          for($i=0;$i-lt40;$i++){Start-Sleep -Milliseconds 500;$w=Top 'Confirm';if($w){$ok=FindNC $w 'OK' 'TButton';$yy=FindNC $w 'Yes' 'TButton';$nn=FindNC $w 'No' 'TButton';if($ok-and-not$yy-and-not$nn-and(IsTest3d $w)-and$w.Current.ClassName-eq'TMessageForm'){break}}}
+          if(-not$ok){Snap 'frame-mismatch';throw 'Frame mismatch'}
+          Click $ok
+          'FRAME_OK: True'|Out-File $report -Append
+
+          $d=$null;$y3=$null;$n3=$null
+          for($i=0;$i-lt160;$i++){Start-Sleep -Milliseconds 500;$d=DescWin '3D' '#32770' 'test3d';if($d){$y3=FindNIC $d 'Yes' '6' @('Button','TButton');$n3=FindNIC $d 'No' '7' @('Button','TButton');if($y3-and$n3-and(HasPostText $d)){break}}}
+          if(-not$y3-or-not$n3-or-not(HasPostText $d)){Snap 'post-frame-mismatch';throw 'Post-frame mismatch'}
+          Click $y3
+          'POST_FRAME_YES: True'|Out-File $report -Append
+
+          $lang=$null
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$xg.Refresh();$lang=Top 'Choose a language';if($lang-and$lang.Current.ProcessId-eq$xg.Id-and$lang.Current.ClassName-eq'TXGLangDlg'-and-not(Get-Process -Name test3d -ErrorAction SilentlyContinue)){break}}
+          if(-not$lang){Snap 'return-language-mismatch';throw 'Returned language mismatch'}
+          $h=[IntPtr]$lang.Current.NativeWindowHandle
+          if($h-eq[IntPtr]::Zero){throw 'Returned language zero handle'}
+          English $h
+          'LANGUAGE_SECOND_ENGLISH_EXACT: True'|Out-File $report -Append
+
+          $wiz=$null;$pro=$null;$next=$null
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$pro=FindNC $wiz 'Professional Mode' 'TRadioButton';$next=FindNC $wiz 'Next >' 'TButton';if($pro-and$next){break}}}
+          if(-not$wiz-or-not$pro-or-not$next){Snap 'wizard1-mismatch';throw 'Wizard step1 mismatch'}
+          Click $pro
+          'PROFESSIONAL_CLICKED: True'|Out-File $report -Append
+          for($i=0;$i-lt24;$i++){Start-Sleep -Milliseconds 250;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$next=FindNC $wiz 'Next >' 'TButton';if($next-and$next.Current.IsEnabled){break}}}
+          if(-not$next-or-not$next.Current.IsEnabled){throw 'Wizard step1 Next disabled'}
+          Click $next
+          'WIZARD1_NEXT: True'|Out-File $report -Append
+
+          $profile=$null;$edit=$null;$next=$null
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$profile=FindNC $wiz 'Profile Creation' 'TPage';$edit=FindUniqueClass $profile 'TEditX';$next=FindNC $wiz 'Next >' 'TButton';if($profile-and$edit-and$next){break}}}
+          if(-not$profile-or-not$edit-or-not$next){Snap 'profile-mismatch';throw 'Profile page mismatch'}
+          Click $edit
+          Start-Sleep -Milliseconds 250
+          [System.Windows.Forms.SendKeys]::SendWait('MZand')
+          Start-Sleep -Milliseconds 500
+          'PROFILE_NAME_TYPED: MZand'|Out-File $report -Append
+          for($i=0;$i-lt24;$i++){Start-Sleep -Milliseconds 250;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$next=FindNC $wiz 'Next >' 'TButton';if($next-and$next.Current.IsEnabled){break}}}
+          if(-not$next-or-not$next.Current.IsEnabled){throw 'Profile Next disabled'}
+          Click $next
+          'PROFILE_NEXT_CLICKED: True'|Out-File $report -Append
+
+          $elo=$null;$next=$null
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$elo=FindNC $wiz 'Elo System' 'TPage';if($elo){$e1600=FindNC $elo '1600' 'TEditX';$exp0=FindNC $elo '0' 'TEditX';$perf=FindNC $elo 'Use Performance Rating' 'TCheckBox';$combo=FindNC $elo 'eXtreme Gammon:-1' 'TComboBox';$next=FindNC $wiz 'Next >' 'TButton';if($e1600-and$exp0-and$perf-and$combo-and$next-and$next.Current.IsEnabled){break}}}}
+          if(-not$elo-or-not$next-or-not$next.Current.IsEnabled){Snap 'elo-page-mismatch';throw 'Elo page mismatch'}
+          'ELO_DEFAULTS_UNCHANGED: True'|Out-File $report -Append
+          Click $next
+          'ELO_NEXT_CLICKED: True'|Out-File $report -Append
+
+          $online=$null;$statsCombo=$null;$next=$null;$blankCount=0
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$online=FindNC $wiz 'If you play Online' 'TPage';if($online){$statsCombo=FindNC $online 'Keep separate Stats for each Nickname' 'TComboBox';$blankCount=CountBlankClass $online 'TEditX';$next=FindNC $wiz 'Next >' 'TButton';if($statsCombo-and$blankCount-eq3-and$next-and$next.Current.IsEnabled){break}}}}
+          if(-not$online-or-not$statsCombo-or$blankCount-ne3-or-not$next-or-not$next.Current.IsEnabled){Snap 'online-page-mismatch';throw 'Online page mismatch'}
+          'ONLINE_DEFAULTS_UNCHANGED: True'|Out-File $report -Append
+          Click $next
+          'ONLINE_NEXT_CLICKED: True'|Out-File $report -Append
+
+          $board=$null;$next=$null
+          for($i=0;$i-lt60;$i++){
+            Start-Sleep -Milliseconds 500
+            $wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2'
+            if($wiz){
+              $board=FindNC $wiz 'Board and Checkers' 'TPage'
+              if($board){
+                $b3=FindNC $board '3d Board' 'TRadioButton'
+                $b2=FindNC $board '2d Board' 'TRadioButton'
+                $right=FindNC $board 'Your checkers bear off on the right' 'TRadioButton'
+                $left=FindNC $board 'Your checkers bear off on the left' 'TRadioButton'
+                $pine=FindNC $board 'Pine' 'TComboBox'
+                $walnut=FindNC $board 'Walnut' 'TComboBox'
+                $mug=FindNC $board 'Mug' 'TComboBox'
+                $video=FindNC $board 'Very High Speed Video' 'TComboBox'
+                $defaults=CountNC $board 'Default' 'TComboBox'
+                $next=FindNC $wiz 'Next >' 'TButton'
+                if($b3-and$b2-and$right-and$left-and$pine-and$walnut-and$mug-and$video-and$defaults-eq2-and$next-and$next.Current.IsEnabled){break}
+              }
+            }
+          }
+          if(-not$board-or-not$next-or-not$next.Current.IsEnabled){Snap 'board-page-mismatch';throw 'Board page stable signature mismatch'}
+          'BOARD_DEFAULTS_UNCHANGED: True'|Out-File $report -Append
+          Click $next
+          'BOARD_NEXT_CLICKED: True'|Out-File $report -Append
+
+          $cal=$null;$recal=$null;$next=$null
+          for($i=0;$i-lt80;$i++){Start-Sleep -Milliseconds 500;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$cal=FindNC $wiz 'Calibration' 'TPage';if($cal){$recal=FindNC $cal 'Recalibrate' 'TButton';$next=FindNC $wiz 'Next >' 'TButton';if($recal-and$next-and$next.Current.IsEnabled){break}}}}
+          if(-not$cal-or-not$recal-or-not$next-or-not$next.Current.IsEnabled){Snap 'calibration-page-mismatch';throw 'Calibration page stable signature mismatch'}
+          'RECALIBRATE_NOT_CLICKED: True'|Out-File $report -Append
+          'CALIBRATION_RESULT_KEPT: True'|Out-File $report -Append
+          Click $next
+          'CALIBRATION_NEXT_CLICKED: True'|Out-File $report -Append
+
+          $levels=$null;$roller=$null;$world=$null;$next=$null
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$levels=FindNC $wiz 'Levels' 'TPage';if($levels){$roller=FindNC $levels 'XG Roller+' 'TComboBox';$world=FindNC $levels 'World Class:3:-1:1001:1001:1001:3:1:3:1001:1001:1001:1001' 'TComboBox';$next=FindNC $wiz 'Next >' 'TButton';if($roller-and$world-and$next-and$next.Current.IsEnabled){break}}}}
+          if(-not$levels-or-not$roller-or-not$world-or-not$next-or-not$next.Current.IsEnabled){Snap 'levels-page-mismatch';throw 'Levels page stable signature mismatch'}
+          'LEVELS_DEFAULTS_UNCHANGED: True'|Out-File $report -Append
+          Click $next
+          'LEVELS_NEXT_CLICKED: True'|Out-File $report -Append
+
+          $game=$null;$competition=$null;$change=$null;$next=$null
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$game=FindNC $wiz 'Game Mode' 'TPage';if($game){$competition=FindNC $game 'Competition Mode' 'TComboBox';$change=FindNC $game 'Change' 'TButton';$next=FindNC $wiz 'Next >' 'TButton';if($competition-and$change-and$next-and$next.Current.IsEnabled){break}}}}
+          if(-not$game-or-not$competition-or-not$change-or-not$next-or-not$next.Current.IsEnabled){Snap 'game-mode-page-mismatch';throw 'Game Mode page stable signature mismatch'}
+          'GAME_MODE_DEFAULTS_UNCHANGED: True'|Out-File $report -Append
+          Click $next
+          'GAME_MODE_NEXT_CLICKED: True'|Out-File $report -Append
+
+          $finished=$null;$start=$null
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if($wiz){$finished=FindNC $wiz 'Finished' 'TPage';$start=FindNC $wiz 'Start Playing' 'TButton';if($finished-and$start-and$start.Current.IsEnabled){break}}}
+          if(-not$finished-or-not$start-or-not$start.Current.IsEnabled){Snap 'finished-page-mismatch';throw 'Finished page stable signature mismatch'}
+          Click $start
+          'START_PLAYING_CLICKED: True'|Out-File $report -Append
+
+          $wizardClosed=$false
+          for($i=0;$i-lt40;$i++){Start-Sleep -Milliseconds 250;$wiz=DescWin 'Configure eXtreme Gammon' 'TWizardDlg' 'eXtremeGammon2';if(-not$wiz){$wizardClosed=$true;break}}
+          "WIZARD_CLOSED: $wizardClosed"|Out-File $report -Append
+          if(-not$wizardClosed){Snap 'wizard-did-not-close';throw 'Wizard did not close'}
+
+          $reg=$null;$trial=$null;$close=$null;$activate=$null;$buy=$null
+          for($i=0;$i-lt80;$i++){Start-Sleep -Milliseconds 500;$reg=DescWin 'Registration' 'TRegisterDlg' 'eXtremeGammon2';if($reg){$trial=FindNC $reg 'Trial' 'TPage';$close=FindNC $reg 'Close' 'TButton';$activate=FindNC $reg 'Activate' 'TButton';$buy=FindNC $reg 'Buy eXtreme Gammon' 'TButton';if($trial-and$close-and$activate-and$buy-and$close.Current.IsEnabled){break}}}
+          if(-not$reg-or-not$trial-or-not$close-or-not$activate-or-not$buy-or-not$close.Current.IsEnabled){Snap 'registration-page-mismatch';throw 'Registration trial page stable signature mismatch'}
+          'REGISTRATION_ACTIVATE_NOT_CLICKED: True'|Out-File $report -Append
+          'REGISTRATION_BUY_NOT_CLICKED: True'|Out-File $report -Append
+          Click $close
+          'REGISTRATION_CLOSE_CLICKED: True'|Out-File $report -Append
+
+          $regClosed=$false
+          for($i=0;$i-lt40;$i++){Start-Sleep -Milliseconds 250;$reg=DescWin 'Registration' 'TRegisterDlg' 'eXtremeGammon2';if(-not$reg){$regClosed=$true;break}}
+          "REGISTRATION_CLOSED: $regClosed"|Out-File $report -Append
+          if(-not$regClosed){Snap 'registration-did-not-close';throw 'Registration did not close'}
+
+          $startDlg=$null;$tip=$null
+          for($i=0;$i-lt60;$i++){Start-Sleep -Milliseconds 500;$startDlg=DescWin 'eXtreme Gammon' 'TStartDlg' 'eXtremeGammon2';if($startDlg){$tip=FindNC $startDlg 'Show Tip of the day at startup' 'TCheckBox';if($tip){break}}}
+          if(-not$startDlg-or-not$tip){Snap 'quick-start-signature-mismatch';throw 'Quick Start stable signature mismatch'}
+          [N]::SetForegroundWindow([IntPtr]$startDlg.Current.NativeWindowHandle)|Out-Null
+          Start-Sleep -Milliseconds 200
+          [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+          $closed=$false
+          for($i=0;$i-lt40;$i++){Start-Sleep -Milliseconds 250;$d=DescWin 'eXtreme Gammon' 'TStartDlg' 'eXtremeGammon2';if(-not$d){$closed=$true;break}}
+          "QUICK_START_ESC_CLOSED: $closed"|Out-File $report -Append
+          if(-not$closed){Snap 'quick-start-esc-failed';throw 'Quick Start did not close with Esc'}
+
+          $xgid='XGID=-b----E-C---eE---c-e----B-:0:0:1:51:7:10:0:11:10'
+          Set-Clipboard -Value $xgid
+          Start-Sleep -Milliseconds 300
+          $clip=Get-Clipboard -Raw
+          "XGID_CLIPBOARD_MATCH: $($clip.Trim()-eq$xgid)"|Out-File $report -Append
+          if($clip.Trim()-ne$xgid){throw 'Clipboard verification failed'}
+
+          $xg.Refresh()
+          $before=$xg.MainWindowTitle
+          "TITLE_BEFORE_IMPORT: $before"|Out-File $report -Append
+          [N]::SetForegroundWindow($xg.MainWindowHandle)|Out-Null
+          Start-Sleep -Milliseconds 300
+          [System.Windows.Forms.SendKeys]::SendWait('^v')
+          'CTRL_V_SENT_TO_MAIN_XG: True'|Out-File $report -Append
+          Start-Sleep 8
+          $xg.Refresh()
+          $after=$xg.MainWindowTitle
+          "TITLE_AFTER_IMPORT: $after"|Out-File $report -Append
+          "TITLE_CHANGED_AFTER_IMPORT: $($after-ne$before)"|Out-File $report -Append
+          "XG_RESPONDING_AFTER_IMPORT: $($xg.Responding)"|Out-File $report -Append
+          Snap 'xgid-imported'
+          if($after-notlike'*Position.xgp*'){throw 'Known XGID was not loaded as Position.xgp'}
+          'XGID_POSITION_READY: True'|Out-File $report -Append
+
+          [N]::SetForegroundWindow($xg.MainWindowHandle)|Out-Null
+          Start-Sleep -Milliseconds 300
+          [System.Windows.Forms.SendKeys]::SendWait('%a')
+          'ANALYZE_MENU_OPEN_SENT_ALT_A: True'|Out-File $report -Append
+          Start-Sleep 1
+          Snap 'analyze-menu-open'
+
+          $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+          $targets=New-Object System.Collections.ArrayList
+          $menuDump=New-Object 'System.Collections.Generic.List[string]'
+          foreach($mi in $all){
+            try{
+              $n=[string]$mi.Current.Name
+              if($n -match 'Analyze|Rollout|Level|Mark'){
+                $r=$mi.Current.BoundingRectangle
+                $menuDump.Add("Name=[$n] Type=[$($mi.Current.ControlType.ProgrammaticName)] Class=[$($mi.Current.ClassName)] Id=[$($mi.Current.AutomationId)] Enabled=[$($mi.Current.IsEnabled)] Offscreen=[$($mi.Current.IsOffscreen)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]")
+              }
+              if($n -match '^Set\s+Analyze\s+Level$'){[void]$targets.Add($mi)}
+            }catch{}
+          }
+          $menuDump|Out-File "$env:GITHUB_WORKSPACE\xg-analyze-menu-items.txt" -Encoding utf8
+          "SET_ANALYZE_LEVEL_MATCHES: $($targets.Count)"|Out-File $report -Append
+          if($targets.Count-ne1){throw "Expected one Set Analyze Level target, found $($targets.Count)"}
+
+          $target=$targets[0]
+          "SET_ANALYZE_LEVEL_NAME: $($target.Current.Name)"|Out-File $report -Append
+          Click $target
+          'SET_ANALYZE_LEVEL_CLICKED: True'|Out-File $report -Append
+          Start-Sleep 2
+          Snap 'set-analyze-level-dialog'
+
+          $tops=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
+          $topDump=New-Object 'System.Collections.Generic.List[string]'
+          $dialogCandidates=0
+          foreach($tw in $tops){
+            try{
+              if($tw.Current.ProcessId-eq$xg.Id){
+                $r=$tw.Current.BoundingRectangle
+                $topDump.Add("Name=[$($tw.Current.Name)] Class=[$($tw.Current.ClassName)] Handle=[$($tw.Current.NativeWindowHandle)] Enabled=[$($tw.Current.IsEnabled)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]")
+                if(([IntPtr]$tw.Current.NativeWindowHandle)-ne([IntPtr]$xg.MainWindowHandle)){$dialogCandidates++}
+              }
+            }catch{}
+          }
+          $topDump|Out-File "$env:GITHUB_WORKSPACE\xg-set-analyze-level-top-windows.txt" -Encoding utf8
+          "SET_ANALYZE_LEVEL_DIALOG_CANDIDATES: $dialogCandidates"|Out-File $report -Append
+          $xg.Refresh()
+          "XG_RESPONDING_FINAL: $($xg.Responding)"|Out-File $report -Append
+          'ANALYZE_FRONTIER_CAPTURED: True'|Out-File $report -Append
+          Get-Content $report
+          Get-Process|Where-Object{$_.ProcessName-match'^eXtremeGammon2$|^test3d$'}|Stop-Process -Force -ErrorAction SilentlyContinue
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-analyze-level-public-v1
+          path: |
+            xg-install.log
+            xg-public-v1-report.txt
+            xg-analyze-menu-items.txt
+            xg-set-analyze-level-top-windows.txt
+            xg-*.png
+            xg-*-ui.txt
+            xg-*-processes.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish connector-visible statuses
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          PRIOR_JOB_STATUS: ${{ job.status }}
+        run: |
+          $ErrorActionPreference='Stop'
+          function Post-Gate([string]$context,[bool]$ok,[string]$description){
+            $state=if($ok){'success'}else{'failure'}
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post-Gate 'xg-public-v1/runner-start' $true "runner reached final gate; prior=$env:PRIOR_JOB_STATUS"
+          $report="$env:GITHUB_WORKSPACE\xg-public-v1-report.txt"
+          if(Test-Path $report){
+            $text=Get-Content $report -Raw
+            $xgid=($text-match'XGID_CLIPBOARD_MATCH: True' -and $text-match'TITLE_AFTER_IMPORT: .*Position\.xgp\*')
+            $menu=($text-match'ANALYZE_MENU_OPEN_SENT_ALT_A: True' -and $text-match'SET_ANALYZE_LEVEL_MATCHES: 1')
+            $dialog=($text-match'SET_ANALYZE_LEVEL_CLICKED: True' -and $text-match'ANALYZE_FRONTIER_CAPTURED: True')
+            Post-Gate 'xg-public-v1/xgid' $xgid "known XGID imported as Position.xgp=$xgid"
+            Post-Gate 'xg-public-v1/analyze-menu' $menu "unique Set Analyze Level target=$menu"
+            Post-Gate 'xg-public-v1/dialog' $dialog "Analyze Level dialog frontier captured=$dialog"
+          }else{
+            Post-Gate 'xg-public-v1/xgid' $false 'report missing'
+            Post-Gate 'xg-public-v1/analyze-menu' $false 'report missing'
+            Post-Gate 'xg-public-v1/dialog' $false 'report missing'
+          }
+          Post-Gate 'xg-public-v1/job' ($env:PRIOR_JOB_STATUS-eq'success') "job status before status publication=$env:PRIOR_JOB_STATUS"
