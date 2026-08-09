@@ -20,6 +20,9 @@ Start-Sleep 1
 
 '@
 $generated=$src.Substring(0,$start)+$newBlock+$src.Substring($tail)
+# PowerShell variable names are case-insensitive; $PID is a reserved read-only variable.
+$generated=$generated.Replace('function FindRolloutPrompt([int]$pid){','function FindRolloutPrompt([int]$processId){')
+$generated=$generated.Replace('ProcessId-eq$pid','ProcessId-eq$processId')
 $tmp=Join-Path $env:RUNNER_TEMP "xg-v16b-candidate-$env:CANDIDATE_RANK.ps1"
 Set-Content $tmp $generated -Encoding UTF8
 & $tmp
