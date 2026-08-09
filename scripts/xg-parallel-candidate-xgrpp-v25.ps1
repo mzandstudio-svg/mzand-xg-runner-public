@@ -5,7 +5,10 @@ if($target-notlike'XGID=*'){throw 'POSITION_XGID must start with XGID='}
 
 $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-parallel-candidate-xgrpp-v21.ps1'
 $src=Get-Content $srcPath -Raw
-$old="$expectedPayload='-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10'"
+$old=@'
+$expectedPayload='-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10'
+'@
+$old=$old.Trim()
 $new='$expectedPayload=$env:POSITION_XGID.Substring(5)'
 if(-not$src.Contains($old)){throw 'v21 expected payload marker not found'}
 $generated=$src.Replace($old,$new)
