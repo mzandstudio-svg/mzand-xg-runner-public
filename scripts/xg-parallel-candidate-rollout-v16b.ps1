@@ -10,8 +10,8 @@ $newBlock=@'
 $sub=$subs[0]
 $sr=$sub.Current.BoundingRectangle
 "ROLLOUT_SUBMENU_RECT: $($sr.X),$($sr.Y),$($sr.Width),$($sr.Height)"|Out-File $report -Append
-# Single-selection changes UIAutomation item ids. v14 evidence proved the
-# Moves 3-ply / cube XG Roller preset center is ~62 px below submenu top.
+# Single-selection changes UIAutomation item ids. The verified prompt screenshot
+# shows this geometry selects: Moves 3-ply, cube decisions XG Roller.
 $presetX=[int]($sr.X+$sr.Width/2)
 $presetY=[int]($sr.Y+62)
 "PRESET_GEOMETRY_CLICK: $presetX,$presetY"|Out-File $report -Append
@@ -23,6 +23,9 @@ $generated=$src.Substring(0,$start)+$newBlock+$src.Substring($tail)
 # PowerShell variable names are case-insensitive; $PID is a reserved read-only variable.
 $generated=$generated.Replace('function FindRolloutPrompt([int]$pid){','function FindRolloutPrompt([int]$processId){')
 $generated=$generated.Replace('ProcessId-eq$pid','ProcessId-eq$processId')
+# XG/Delphi exposes the 1296 spin edit with a variable UIA class across runs.
+# Keep the prompt identity and Ok button strict, but validate the game count by exact UIA Name.
+$generated=$generated.Replace("if(`$e.Current.Name-eq'1296' -and `$e.Current.ClassName-eq'TSpinEditX'){`$games1296=`$true}","if(`$e.Current.Name-eq'1296'){`$games1296=`$true}")
 $tmp=Join-Path $env:RUNNER_TEMP "xg-v16b-candidate-$env:CANDIDATE_RANK.ps1"
 Set-Content $tmp $generated -Encoding UTF8
 & $tmp
