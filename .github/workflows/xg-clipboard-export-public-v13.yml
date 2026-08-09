@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/xg-clipboard-export-public-v13.yml
+      - scripts/xg-export-clipboard-v13.ps1
   workflow_dispatch:
 
 permissions:
@@ -23,7 +24,7 @@ jobs:
           GATE_SHA: ${{ github.sha }}
         run: |
           function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
-          Post 'xg-public-v13/runner-start' 'pending' 'Public Windows runner started v13'
+          Post 'xg-public-v13/runner-start' 'pending' 'Public Windows runner started v13 fixed'
           Post "xg-public-v13/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
 
       - uses: actions/checkout@v4
