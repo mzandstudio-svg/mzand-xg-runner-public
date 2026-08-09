@@ -20,12 +20,47 @@ Start-Sleep 1
 
 '@
 $generated=$src.Substring(0,$start)+$newBlock+$src.Substring($tail)
+
 # PowerShell variable names are case-insensitive; $PID is a reserved read-only variable.
 $generated=$generated.Replace('function FindRolloutPrompt([int]$pid){','function FindRolloutPrompt([int]$processId){')
 $generated=$generated.Replace('ProcessId-eq$pid','ProcessId-eq$processId')
-# XG/Delphi exposes the 1296 spin edit with a variable UIA class across runs.
-# Keep the prompt identity and Ok button strict, but validate the game count by exact UIA Name.
-$generated=$generated.Replace("if(`$e.Current.Name-eq'1296' -and `$e.Current.ClassName-eq'TSpinEditX'){`$games1296=`$true}","if(`$e.Current.Name-eq'1296'){`$games1296=`$true}")
+
+# Delphi exposes the prompt as a valid UIA window, but its edit/button controls are
+# not consistently parented beneath that element. Search the full UIA tree and keep
+# control matches scoped to this XG process.
+$oldP=@'
+$pdesc=$prompt.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+'@
+$oldP=$oldP.Trim()
+$newP=@'
+$pdesc=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+'@
+$newP=$newP.Trim()
+if(-not $generated.Contains($oldP)){throw 'prompt descendant source pattern missing'}
+$generated=$generated.Replace($oldP,$newP)
+
+$oldOk=@'
+if($e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button -and $e.Current.Name-eq'Ok'){$ok=$e}
+'@
+$oldOk=$oldOk.Trim()
+$newOk=@'
+if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button -and $e.Current.Name-eq'Ok'){$ok=$e}
+'@
+$newOk=$newOk.Trim()
+if(-not $generated.Contains($oldOk)){throw 'Ok control source pattern missing'}
+$generated=$generated.Replace($oldOk,$newOk)
+
+$oldGames=@'
+if($e.Current.Name-eq'1296' -and $e.Current.ClassName-eq'TSpinEditX'){$games1296=$true}
+'@
+$oldGames=$oldGames.Trim()
+$newGames=@'
+if($e.Current.ProcessId-eq$xg.Id -and $e.Current.Name-eq'1296'){$games1296=$true}
+'@
+$newGames=$newGames.Trim()
+if(-not $generated.Contains($oldGames)){throw '1296 control source pattern missing'}
+$generated=$generated.Replace($oldGames,$newGames)
+
 $tmp=Join-Path $env:RUNNER_TEMP "xg-v16b-candidate-$env:CANDIDATE_RANK.ps1"
 Set-Content $tmp $generated -Encoding UTF8
 & $tmp
