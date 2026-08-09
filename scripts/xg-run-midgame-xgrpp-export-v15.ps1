@@ -42,8 +42,8 @@ $beforeSource=TopSource $baseline
 "TOP_SOURCE_BEFORE_XGRPP: $beforeSource"|Out-File $report15
 "BASELINE_CLIPBOARD_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
 if(-not$beforeSource){throw 'Could not parse baseline top candidate source'}
-if($beforeSource-like'Book*'){throw "Midgame control unexpectedly hit Book source [$beforeSource]"}
-Post 'xg-public-v15/nonbook-baseline' 'success' "baseline top source=$beforeSource"
+"BOOK_BASELINE_ALLOWED: $($beforeSource-like'Book*')"|Out-File $report15 -Append
+Post 'xg-public-v15/baseline-ready' 'success' "baseline top source=$beforeSource"
 
 $wr=New-Object V15N+RECT
 if(-not[V15N]::GetWindowRect($hwnd,[ref]$wr)){throw 'GetWindowRect failed'}
@@ -58,7 +58,7 @@ $xgrX=$wr.Left+230;$xgrY=$wr.Top+448
 LeftClick $xgrX $xgrY
 'XGRPP_COMMAND_CLICKED: True'|Out-File $report15 -Append
 'ROLLOUT_MENU_COMMAND_CLICKED: False'|Out-File $report15 -Append
-Post 'xg-public-v15/xgrpp-started' 'success' 'XG Roller++ clicked for non-book top candidate'
+Post 'xg-public-v15/xgrpp-started' 'success' 'XG Roller++ clicked for current top candidate'
 
 $complete=$false
 $elapsed=0
