@@ -33,6 +33,25 @@ function TopSource([string]$text){
   return ''
 }
 
+& "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
+$xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+$xg.Refresh()
+$hwnd=[IntPtr]$xg.MainWindowHandle
+$menu=[V8N]::GetMenu($hwnd)
+$top=New-Object V8N+RECT
+if(-not[V8N]::GetMenuItemRect($hwnd,$menu,4,[ref]$top)){throw 'Analyze top rect failed after midgame switch'}
+[V8N]::SetForegroundWindow($hwnd)|Out-Null
+Start-Sleep -Milliseconds 250
+ClickXY ([int](($top.Left+$top.Right)/2)) ([int](($top.Top+$top.Bottom)/2))
+Start-Sleep -Milliseconds 500
+$sub=[V8N]::GetSubMenu($menu,4)
+$pos=New-Object V8N+RECT
+if(-not[V8N]::GetMenuItemRect($hwnd,$sub,1,[ref]$pos)){throw 'Analyze Position row rect failed after midgame switch'}
+ClickXY ([int](($pos.Left+$pos.Right)/2)) ([int](($pos.Top+$pos.Bottom)/2))
+Post 'xg-public-v15/midgame-analyze-started' 'success' 'Analyze Position clicked for non-book midgame control'
+Start-Sleep 20
+Shot "$env:GITHUB_WORKSPACE\xg-v15-midgame-analysis.png"
+
 $xg.Refresh()
 $hwnd=[IntPtr]$xg.MainWindowHandle
 $report15="$env:GITHUB_WORKSPACE\xg-v15-xgrpp-report.txt"
