@@ -57,12 +57,6 @@ function DismissSaveGameNow(){
   return ([V21Save]::FindExact('Save Game')-eq[IntPtr]::Zero)
 }
 function ReissueMidgameAnalysis(){
-  $mid='XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10'
-  Set-Clipboard -Value $mid
-  [V18N]::SetForegroundWindow($hwnd)|Out-Null
-  Start-Sleep -Milliseconds 250
-  [System.Windows.Forms.SendKeys]::SendWait('^v')
-  Start-Sleep 3
   $main=[V18N]::GetMenu($hwnd);$analyze=[V18N]::GetSubMenu($main,4);$positionId=[V18N]::GetMenuItemID($analyze,1)
   [V18N]::SetForegroundWindow($hwnd)|Out-Null;Start-Sleep -Milliseconds 250
   [void][V18N]::SendMessage($hwnd,0x0111,[IntPtr]([int]$positionId),[IntPtr]::Zero)
