@@ -51,6 +51,19 @@ for($saveWait=0;$saveWait-lt20;$saveWait++){
 "SAVE_GAME_PROMPT_SEEN: $savePromptSeen"|Out-File $report -Append
 "SAVE_GAME_PROMPT_DISMISSED: $savePromptDismissed"|Out-File $report -Append
 
+# The first Analyze Position command can be consumed by the Save Game prompt. After
+# dismissing it with No, explicitly issue Analyze Position again. This avoids waiting
+# on a blank Move panel while the imported position itself remains intact.
+if($savePromptDismissed){
+  $xg.Refresh()
+  [V16N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null
+  Start-Sleep -Milliseconds 250
+  [void][V16N]::SendMessage([IntPtr]$xg.MainWindowHandle,0x0111,[IntPtr]([int]$positionId),[IntPtr]::Zero)
+  "ANALYZE_POSITION_REISSUED_AFTER_SAVE_NO: True"|Out-File $report -Append
+  Post "$prefix/analyze-reissued" 'success' 'Analyze Position reissued after Save Game No'
+  Start-Sleep 2
+}
+
 $baselineText=''
 $analysisReady=$false
 $analysisElapsed=0
