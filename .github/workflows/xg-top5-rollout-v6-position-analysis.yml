@@ -119,7 +119,7 @@ jobs:
           "ANALYZE_SUBMENU_COUNT: $count"|Out-File $report -Append
           "POSITION_MENU_INDEX: 1"|Out-File $report -Append
           "POSITION_COMMAND_ID: $positionId"|Out-File $report -Append
-          if($positionId-eq[uint32]0xFFFFFFFF){throw 'Analyze Position has no command id'}
+          if($positionId-eq[uint32]::MaxValue){throw 'Analyze Position has no command id'}
           [Top5N]::SetForegroundWindow($hwnd)|Out-Null
           Start-Sleep -Milliseconds 250
           [void][Top5N]::SendMessage($hwnd,0x0111,[IntPtr]([int]$positionId),[IntPtr]::Zero)
