@@ -1,0 +1,119 @@
+name: XG XGR++ Teacher Compare v17
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-xgrpp-teacher-compare-v17.yml
+      - scripts/xg-run-midgame-xgrpp-export-v15.ps1
+      - scripts/compare_xgrpp_to_teacher.py
+      - references/xg-v16-test-teacher.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  xgrpp-compare:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Publish runner start
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){
+            $payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress
+            $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+            Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          }
+          Post 'xg-v17/runner-start' 'pending' 'XGR++ comparison Windows runner started'
+          Post "xg-v17/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if(Test-Path $log){Copy-Item $log "$env:GITHUB_WORKSPACE\xg-install-v17.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw 'XG executable missing'}
+          "xgexe=$exe"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Run export-confirmed XG Roller++ on current best move
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-run-midgame-xgrpp-export-v15.ps1
+
+      - name: Parse XG Roller++ export
+        shell: powershell
+        run: |
+          python scripts/parse_xg_position_export.py xg-v15-after-xgrpp.txt xg-v17-xgrpp.json
+          if($LASTEXITCODE-ne0){throw 'XGR++ export parse failed'}
+
+      - name: Compare XG Roller++ to rollout teacher
+        shell: powershell
+        run: |
+          python scripts/compare_xgrpp_to_teacher.py xg-v17-xgrpp.json references/xg-v16-test-teacher.json xg-v17-comparison.json | Tee-Object -FilePath xg-v17-summary.txt
+          if($LASTEXITCODE-ne0){throw 'XGR++ teacher comparison failed'}
+
+      - name: Publish comparison status
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $d=Get-Content xg-v17-comparison.json -Raw|ConvertFrom-Json
+          $state=$(if($d.top1_match){'success'}else{'failure'})
+          $desc="XGR++ top1=$($d.xgrpp_top_move); teacher=$($d.teacher_best_move); match=$($d.top1_match)"
+          $payload=@{state=$state;context='xg-v17/top1-vs-teacher';description=$desc}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+
+      - name: Upload comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v17-xgrpp-teacher-compare
+          path: |
+            xg-install-v17.log
+            xg-v15-xgrpp-report.txt
+            xg-v15-before-xgrpp.txt
+            xg-v15-after-xgrpp.txt
+            xg-v17-xgrpp.json
+            xg-v17-comparison.json
+            xg-v17-summary.txt
+            xg-v15-*.png
+            xg-v8-*.png
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Publish final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          $state=$(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})
+          $payload=@{state=$state;context='xg-v17/job';description="job=$env:JOB_STATUS"}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          $payload=@{state='success';context='xg-v17/runner-start';description='runner reached final status'}|ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
