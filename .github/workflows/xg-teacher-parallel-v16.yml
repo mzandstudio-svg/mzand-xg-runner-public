@@ -1,4 +1,4 @@
-name: XG Teacher Parallel v16
+name: XG Teacher Parallel v16b
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/xg-teacher-parallel-v16.yml
       - scripts/xg-parallel-candidate-rollout-v16.ps1
+      - scripts/xg-parallel-candidate-rollout-v16b.ps1
       - scripts/aggregate_parallel_rollouts.py
       - scripts/parse_xg_position_export.py
       - scripts/xg-reach-xgid.ps1
@@ -65,7 +66,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GATE_SHA: ${{ github.sha }}
           CANDIDATE_RANK: ${{ matrix.rank }}
-        run: ./scripts/xg-parallel-candidate-rollout-v16.ps1
+        run: ./scripts/xg-parallel-candidate-rollout-v16b.ps1
 
       - name: Upload candidate teacher record
         if: always()
