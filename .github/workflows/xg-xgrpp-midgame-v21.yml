@@ -1,0 +1,116 @@
+name: XG Non-Book Midgame XGR++ Coverage v21
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-xgrpp-midgame-v21.yml
+      - scripts/xg-parallel-candidate-xgrpp-v21.ps1
+      - scripts/xg-parallel-candidate-xgrpp-v18.ps1
+      - scripts/xg-switch-midgame-v15.ps1
+      - scripts/aggregate_xgrpp_vs_teacher.py
+      - references/xg-v19-midgame-teacher.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  xgrpp-candidate:
+    name: midgame-xgrpp-${{ matrix.rank }}
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        rank: [1,2,3,4,5]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if(Test-Path $log){Copy-Item $log "$env:GITHUB_WORKSPACE\xg-install-v21-c${{ matrix.rank }}.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw 'XG executable missing'}
+          "xgexe=$exe"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Switch to non-book midgame XGID
+        shell: powershell
+        run: ./scripts/xg-switch-midgame-v15.ps1
+
+      - name: Evaluate one candidate with XG Roller++
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+        run: ./scripts/xg-parallel-candidate-xgrpp-v21.ps1
+
+      - name: Upload candidate XGR++ record
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v21-midgame-candidate-${{ matrix.rank }}
+          path: |
+            xg-v18-candidate-${{ matrix.rank }}-report.txt
+            xg-v18-candidate-${{ matrix.rank }}-baseline.txt
+            xg-v18-candidate-${{ matrix.rank }}-baseline.json
+            xg-v18-candidate-${{ matrix.rank }}-final.txt
+            xg-v18-candidate-${{ matrix.rank }}-xgrpp.json
+            xg-v18-candidate-${{ matrix.rank }}-*.png
+            xg-v15-switch-report.txt
+            xg-install-v21-c${{ matrix.rank }}.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+  aggregate-coverage:
+    name: aggregate-midgame-xgrpp-coverage
+    needs: xgrpp-candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download XGR++ records
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xg-v21-midgame-candidate-*
+          path: artifacts
+          merge-multiple: true
+      - name: Compare XGR++ ordering to rollout teacher
+        run: |
+          python scripts/aggregate_xgrpp_vs_teacher.py artifacts references/xg-v19-midgame-teacher.json xg-v21-midgame-coverage.json | tee xg-v21-midgame-summary.txt
+      - name: Upload coverage audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v21-midgame-coverage-audit
+          path: |
+            xg-v21-midgame-coverage.json
+            xg-v21-midgame-summary.txt
+          retention-days: 30
+      - name: Publish coverage gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          d=json.load(open('xg-v21-midgame-coverage.json'))
+          state='success' if d['top1_match'] else 'failure'
+          desc=f"midgame XGR++ top1={d['top1_match']}; pairwise={d['pairwise_order_accuracy']:.3f}"
+          payload=json.dumps({'state':state,'context':'xg-v21/midgame-coverage','description':desc}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
