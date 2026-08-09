@@ -1,0 +1,49 @@
+name: XG Show All Moves Coverage v20
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-show-all-moves-v20.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  show-all:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          "xgexe=C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe"|Out-File $env:GITHUB_ENV -Append
+      - name: Reach proven XGID
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+      - name: Show all moves and export
+        shell: powershell
+        run: ./scripts/xg-show-all-moves-v20.ps1
+      - name: Upload coverage evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v20-show-all-moves
+          path: |
+            xg-v20-report.txt
+            xg-v20-before-show-all.txt
+            xg-v20-before-show-all.json
+            xg-v20-after-show-all.txt
+            xg-v20-after-show-all.json
+            xg-v20-*.png
+          if-no-files-found: ignore
+          retention-days: 30
