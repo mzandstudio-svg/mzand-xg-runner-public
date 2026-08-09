@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/xg-hard-xgrpp-mid21-v25.yml
       - scripts/xg-parallel-candidate-xgrpp-v25.ps1
+      - scripts/xg-reach-xgid-retry.ps1
       - scripts/aggregate_xgrpp_screening.py
   workflow_dispatch:
 
@@ -61,7 +62,7 @@ jobs:
 
       - name: Reach proven startup XGID
         shell: powershell
-        run: ./scripts/xg-reach-xgid.ps1
+        run: ./scripts/xg-reach-xgid-retry.ps1
 
       - name: Switch to mined hard position
         shell: powershell
