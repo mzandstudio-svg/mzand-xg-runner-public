@@ -8,47 +8,78 @@ $baselineText=ExportText $xg
 $baseline=ParseExport $baselineText "$prefix-baseline"
 '@
 $new=@'
-$root=[System.Windows.Automation.AutomationElement]::RootElement
-$savePromptSeen=$false
-$savePromptDismissed=$false
-for($saveWait=0;$saveWait-lt20;$saveWait++){
-  Start-Sleep -Milliseconds 500
-  $allUi=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-  $saveDialogs=@()
-  foreach($e in $allUi){try{if($e.Current.ProcessId-eq$xg.Id -and $e.Current.Name-eq'Save Game' -and -not$e.Current.IsOffscreen){$saveDialogs+=,$e}}catch{}}
-  if($saveDialogs.Count-gt1){Shot "$prefix-save-prompt-ambiguous";throw "Expected at most one Save Game dialog, got $($saveDialogs.Count)"}
-  if($saveDialogs.Count-eq1){
-    $savePromptSeen=$true
-    $dlg=$saveDialogs[0]
-    $dr=$dlg.Current.BoundingRectangle
-    if($dr.Width-lt330 -or $dr.Width-gt390 -or $dr.Height-lt120 -or $dr.Height-gt170){Shot "$prefix-save-prompt-geometry-invalid";throw "Unexpected Save Game dialog geometry $($dr.Width)x$($dr.Height)"}
-    $noX=[int]($dr.X+($dr.Width*0.66));$noY=[int]($dr.Y+($dr.Height*0.85))
-    Shot "$prefix-save-prompt-before-no"
-    LeftClick $noX $noY
-    $savePromptDismissed=$true
-    Start-Sleep -Milliseconds 700
-    break
-  }
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class V21Save {
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string className, string windowName);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 }
-"SAVE_GAME_PROMPT_SEEN: $savePromptSeen"|Out-File $report -Append
-"SAVE_GAME_PROMPT_DISMISSED: $savePromptDismissed"|Out-File $report -Append
-if($savePromptDismissed){
+"@
+function DismissSaveGameNow(){
+  $dialog=[V21Save]::FindWindow($null,'Save Game')
+  if($dialog-eq[IntPtr]::Zero){return $false}
+  $noButton=[V21Save]::FindWindowEx($dialog,[IntPtr]::Zero,'Button','No')
+  if($noButton-ne[IntPtr]::Zero){
+    [V21Save]::SendMessage($noButton,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
+    Start-Sleep -Milliseconds 900
+    if([V21Save]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero){return $true}
+  }
+  [V21Save]::SetForegroundWindow($dialog)|Out-Null
+  Start-Sleep -Milliseconds 200
+  [System.Windows.Forms.SendKeys]::SendWait('%n')
+  Start-Sleep -Milliseconds 900
+  return ([V21Save]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero)
+}
+function ReissueMidgameAnalysis(){
+  $mid='XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10'
+  Set-Clipboard -Value $mid
+  [V18N]::SetForegroundWindow($hwnd)|Out-Null
+  Start-Sleep -Milliseconds 250
+  [System.Windows.Forms.SendKeys]::SendWait('^v')
+  Start-Sleep 3
   $main=[V18N]::GetMenu($hwnd);$analyze=[V18N]::GetSubMenu($main,4);$positionId=[V18N]::GetMenuItemID($analyze,1)
   [V18N]::SetForegroundWindow($hwnd)|Out-Null;Start-Sleep -Milliseconds 250
   [void][V18N]::SendMessage($hwnd,0x0111,[IntPtr]([int]$positionId),[IntPtr]::Zero)
-  "ANALYZE_REISSUED_AFTER_SAVE_PROMPT: True"|Out-File $report -Append
 }
-$baselineText='';$analysisReady=$false;$analysisElapsed=0
+$savePromptSeen=$false
+$savePromptDismissed=$false
+$reissueCount=0
+$expectedPayload='-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10'
+$baselineText='';$baseline=$null;$analysisReady=$false;$analysisElapsed=0
 while($analysisElapsed-lt240 -and -not$analysisReady){
-  Start-Sleep 5;$analysisElapsed+=5;$xg.Refresh()
+  Start-Sleep 2;$analysisElapsed+=2;$xg.Refresh()
   if($xg.HasExited){throw 'XG exited during Analyze Position'}
+  if(DismissSaveGameNow){
+    $savePromptSeen=$true;$savePromptDismissed=$true;$reissueCount++
+    "SAVE_GAME_PROMPT_DISMISSED_AT_SECONDS: $analysisElapsed"|Out-File $report -Append
+    if($reissueCount-gt3){Shot "$prefix-save-prompt-loop";throw 'Save Game prompt repeated more than three times'}
+    ReissueMidgameAnalysis
+    "ANALYZE_REISSUED_AFTER_SAVE_PROMPT: $reissueCount"|Out-File $report -Append
+    continue
+  }
   if(-not$xg.Responding){continue}
   try{$candidateText=ExportText $xg}catch{continue}
-  if($candidateText.Length-gt100 -and $candidateText-match'(?m)^\s*1\.' -and $candidateText-match'(?i)eq:[+-]\d+\.\d+'){$baselineText=$candidateText;$analysisReady=$true}
+  if($candidateText.Length-le100 -or $candidateText-notmatch'(?m)^\s*1\.' -or $candidateText-notmatch'(?i)eq:[+-]\d+\.\d+'){continue}
+  try{$probe=ParseExport $candidateText "$prefix-baseline-probe"}catch{continue}
+  if([string]$probe.xgid_payload-ne$expectedPayload){
+    "BASELINE_XGID_MISMATCH_AT_SECONDS: $analysisElapsed"|Out-File $report -Append
+    $reissueCount++
+    if($reissueCount-gt3){Shot "$prefix-xgid-mismatch";throw "Analyze Position stayed on unexpected XGID [$($probe.xgid_payload)]"}
+    ReissueMidgameAnalysis
+    continue
+  }
+  $baselineText=$candidateText;$baseline=$probe;$analysisReady=$true
 }
+"SAVE_GAME_PROMPT_SEEN: $savePromptSeen"|Out-File $report -Append
+"SAVE_GAME_PROMPT_DISMISSED: $savePromptDismissed"|Out-File $report -Append
+"ANALYZE_REISSUE_COUNT: $reissueCount"|Out-File $report -Append
 if(-not$analysisReady){Shot "$prefix-analysis-timeout";throw "Analyze Position export did not become ready within ${analysisElapsed}s"}
 "ANALYSIS_READY_SECONDS: $analysisElapsed"|Out-File $report -Append
-$baseline=ParseExport $baselineText "$prefix-baseline"
+Set-Content (Join-Path $env:GITHUB_WORKSPACE "$prefix-baseline.txt") $baselineText -Encoding UTF8
+$baseline|ConvertTo-Json -Depth 12|Set-Content (Join-Path $env:GITHUB_WORKSPACE "$prefix-baseline.json") -Encoding UTF8
 '@
 if(-not$src.Contains($old)){throw 'v18 fixed Analyze Position block not found'}
 $generated=$src.Replace($old,$new)
