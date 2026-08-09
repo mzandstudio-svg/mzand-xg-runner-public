@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 from pathlib import Path
 
 BLOCKED_TOKENS = ("pristine", "blind")
 SUPPORTED_SCHEMAS = {"mzand.xg.teacher-label.v2", "mzand.xg.teacher-reference.v1"}
+MIN_ROLLOUT_GAMES = 1296
 
 
 def load(path: Path):
@@ -21,6 +23,22 @@ def confidence_pm(candidate):
 def rollout_rank(candidate):
     value = candidate.get("rollout_rank")
     return int(value) if value is not None else None
+
+
+def infer_rollout_games(data, candidate):
+    value = candidate.get("rollout_games")
+    if value is not None:
+        return int(value)
+    texts = [
+        str(candidate.get("provenance") or ""),
+        str(data.get("teacher_method") or ""),
+        str((data.get("teacher") or {}).get("label_method") or ""),
+    ]
+    for text in texts:
+        match = re.search(r"\b(\d+)\s*(?:-game|Games rolled)\b", text, re.I)
+        if match:
+            return int(match.group(1))
+    return None
 
 
 def reject_sensitive(path: Path, data):
@@ -50,6 +68,13 @@ def normalize_teacher(path: Path, data):
         raise ValueError(f"duplicate moves in {path.name}: {moves}")
     if data.get("best_move") and moves[0] != data["best_move"]:
         raise ValueError(f"best move mismatch in {path.name}: {moves[0]} != {data['best_move']}")
+    for candidate in candidates:
+        games = infer_rollout_games(data, candidate)
+        if games is None or games < MIN_ROLLOUT_GAMES:
+            raise ValueError(
+                f"teacher candidate below required rollout depth in {path.name}: "
+                f"move={candidate.get('move')} games={games}"
+            )
     return candidates
 
 
@@ -95,10 +120,7 @@ def main():
         positions.append(position)
 
         for rank, candidate in enumerate(candidates, 1):
-            games = candidate.get("rollout_games")
-            if games is None:
-                provenance = candidate.get("provenance", "")
-                games = 1296 if "1296 Games rolled" in provenance else None
+            games = infer_rollout_games(data, candidate)
             candidate_rows.append(
                 {
                     "scope": "non-pristine development teacher",
@@ -153,6 +175,7 @@ def main():
     summary = {
         "schema": "mzand.xg.development-teacher-corpus.v1",
         "scope": "non-pristine development teachers only; explicitly excludes pristine/blind benchmark data",
+        "minimum_rollout_games": MIN_ROLLOUT_GAMES,
         "teacher_position_count": len(positions),
         "candidate_row_count": len(candidate_rows),
         "decisive_pair_count": len(decisive_pairs),
@@ -167,6 +190,7 @@ def main():
     print(f"candidate_rows={summary['candidate_row_count']}")
     print(f"decisive_pairs={summary['decisive_pair_count']}")
     print(f"ambiguous_pairs={summary['ambiguous_pair_count']}")
+    print(f"minimum_rollout_games={summary['minimum_rollout_games']}")
     print(f"source_files={summary['source_files']}")
 
 
