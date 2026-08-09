@@ -1,10 +1,11 @@
-name: XG Top5 Rollout v8 Submenu Retry
+name: XG Top5 Rollout v8 Submenu Geometry
 
 on:
   push:
     branches: [main]
     paths:
       - .github/workflows/xg-top5-rollout-v8-submenu.yml
+      - scripts/xg-top5-rollout-submenu-probe.ps1
   workflow_dispatch:
 
 permissions:
