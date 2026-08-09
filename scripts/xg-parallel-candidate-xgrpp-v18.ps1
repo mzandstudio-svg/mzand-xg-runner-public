@@ -53,12 +53,21 @@ function ParseExport([string]$text,[string]$stem){
   if($LASTEXITCODE-ne0){throw "parse failed for $stem"}
   return (Get-Content $json -Raw|ConvertFrom-Json)
 }
+function SaveScreeningRecord($parsed,$candidate,[int]$rank,[int]$elapsed,[string]$method,[bool]$reused,[string]$path){
+  $record=[ordered]@{
+    schema='mzand.xg.screening-candidate.v1';xgid=$parsed.xgid;xgid_payload=$parsed.xgid_payload;
+    original_analysis_rank=$rank;screening_method=$method;reused_existing=$reused;elapsed_seconds=$elapsed;
+    candidate=$candidate;score=$parsed.score;cube=$parsed.cube;on_roll=$parsed.on_roll;dice=$parsed.dice;xg_version=$parsed.xg_version
+  }
+  $record|ConvertTo-Json -Depth 12|Set-Content $path -Encoding UTF8
+}
 
 $rank=[int]$env:CANDIDATE_RANK
 if($rank-lt1 -or $rank-gt5){throw "rank must be 1..5, got $rank"}
 $prefix="xg-v18-candidate-$rank"
 $report=Join-Path $env:GITHUB_WORKSPACE "$prefix-report.txt"
-"XG Parallel XG Roller++ v18 rank=$rank"|Out-File $report
+$outJson=Join-Path $env:GITHUB_WORKSPACE "$prefix-xgrpp.json"
+"XG Screening v18 rank=$rank"|Out-File $report
 $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
 $xg.Refresh();if($xg.MainWindowTitle-notlike'*Position.xgp*'){throw 'Position.xgp not ready'}
 $hwnd=[IntPtr]$xg.MainWindowHandle
@@ -73,10 +82,32 @@ $baseline=ParseExport $baselineText "$prefix-baseline"
 $target=$baseline.candidates|Where-Object{$_.rank-eq$rank}|Select-Object -First 1
 if($null-eq$target){throw "baseline missing rank $rank"}
 $targetMove=[string]$target.move
+$baselineMethod=[string]$target.analysis_method
 "TARGET_MOVE: $targetMove"|Out-File $report -Append
 "BASELINE_SOURCE: $($target.source)"|Out-File $report -Append
+"BASELINE_METHOD: $baselineMethod"|Out-File $report -Append
 "BASELINE_EQUITY: $($target.equity)"|Out-File $report -Append
 Post "$prefix/target" 'success' "candidate rank $rank identified"
+
+# Screening priority: completed deep Rollout >=1296 > existing XG Roller++ > fresh XG Roller++.
+$reuse=$false
+$reuseMethod=''
+if($baselineMethod-eq'Rollout'){
+  $prov=[string]$target.provenance
+  $m=[regex]::Match($prov,'(?i)\b(\d+)\s+Games rolled\b')
+  if($m.Success -and [int]$m.Groups[1].Value-ge1296){$reuse=$true;$reuseMethod='Rollout'}
+}elseif($baselineMethod-eq'XG Roller++'){
+  $reuse=$true;$reuseMethod='XG Roller++'
+}
+if($reuse){
+  "REUSED_EXISTING: True"|Out-File $report -Append
+  "SCREENING_METHOD: $reuseMethod"|Out-File $report -Append
+  SaveScreeningRecord $baseline $target $rank 0 $reuseMethod $true $outJson
+  Post "$prefix/complete" 'success' "reused existing screening method for rank $rank"
+  Shot "$prefix-reused-final"
+  Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
+  exit 0
+}
 
 $wr=New-Object V18N+RECT
 if(-not[V18N]::GetWindowRect($hwnd,[ref]$wr)){throw 'GetWindowRect failed'}
@@ -97,7 +128,7 @@ $xgrX=[int]($cr.X+$cr.Width/2);$xgrY=[int]($cr.Y+203)
 "XGRPP_GEOMETRY_CLICK: $xgrX,$xgrY"|Out-File $report -Append
 Shot "$prefix-context-before-xgrpp"
 LeftClick $xgrX $xgrY
-Post "$prefix/started" 'success' 'XG Roller++ command clicked at verified context geometry'
+Post "$prefix/started" 'success' 'fresh XG Roller++ command clicked at verified context geometry'
 Start-Sleep 2
 
 $complete=$false;$elapsed=0;$finalParsed=$null;$finalText=''
@@ -118,15 +149,11 @@ while($elapsed-lt600 -and -not$complete){
 if(-not$complete){Shot "$prefix-timeout";throw "XG Roller++ not exported for target rank $rank within 600 seconds"}
 $final=($finalParsed.candidates|Where-Object{$_.move-eq$targetMove -and $_.analysis_method-eq'XG Roller++'}|Select-Object -First 1)
 Set-Content (Join-Path $env:GITHUB_WORKSPACE "$prefix-final.txt") $finalText -Encoding UTF8
-$record=[ordered]@{
-  schema='mzand.xg.xgrpp-candidate.v1';xgid=$finalParsed.xgid;xgid_payload=$finalParsed.xgid_payload;
-  original_analysis_rank=$rank;elapsed_seconds=$elapsed;candidate=$final;score=$finalParsed.score;cube=$finalParsed.cube;
-  on_roll=$finalParsed.on_roll;dice=$finalParsed.dice;xg_version=$finalParsed.xg_version
-}
-$record|ConvertTo-Json -Depth 12|Set-Content (Join-Path $env:GITHUB_WORKSPACE "$prefix-xgrpp.json") -Encoding UTF8
+SaveScreeningRecord $finalParsed $final $rank $elapsed 'XG Roller++' $false $outJson
 "XGRPP_COMPLETE: True"|Out-File $report -Append
+"REUSED_EXISTING: False"|Out-File $report -Append
 "ELAPSED_SECONDS: $elapsed"|Out-File $report -Append
 "XGRPP_EQUITY: $($final.equity)"|Out-File $report -Append
-Post "$prefix/complete" 'success' "XG Roller++ export complete for rank $rank in ${elapsed}s"
+Post "$prefix/complete" 'success' "fresh XG Roller++ export complete for rank $rank in ${elapsed}s"
 Shot "$prefix-final"
 Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
