@@ -27,13 +27,12 @@ function RightClick([int]$x,[int]$y){[R10N]::SetCursorPos($x,$y)|Out-Null;Start-
 function HoverRollout([int]$rowX,[int]$row5Y){
   RightClick $rowX $row5Y
   Start-Sleep -Milliseconds 700
-  # Proven v7/v8 geometry: context popup left=rowX; popup bottom=row5Y; height=424; Rollout center offset +114,+221 from popup top.
   $contextTop=$row5Y-424
   $rollX=$rowX+114
   $rollY=$contextTop+221
   [R10N]::SetCursorPos($rollX,$rollY)|Out-Null
   Start-Sleep 1
-  return @($rowX+222,$contextTop+209)
+  return @(($rowX+222),($contextTop+209))
 }
 
 $report="$env:GITHUB_WORKSPACE\xg-top5-v10-report.txt"
@@ -56,7 +55,6 @@ Start-Sleep -Milliseconds 500;Shot 'xg-top5-v10-selected-five'
 $subOrigin=HoverRollout $x $ys[4]
 Shot 'xg-top5-v10-submenu-before-preset'
 $subX=[int]$subOrigin[0];$subY=[int]$subOrigin[1]
-# Proven v8 submenu: first preset center offset 12, then 19px rows. Fourth preset center = +69px.
 $presetX=$subX+167;$presetY=$subY+69
 "PRESET4_CLICK_POINT: $presetX,$presetY"|Out-File $report -Append
 LeftClick $presetX $presetY
@@ -67,7 +65,6 @@ Start-Sleep -Milliseconds 700
 $subOrigin2=HoverRollout $x $ys[4]
 Shot 'xg-top5-v10-submenu-after-preset'
 $subX2=[int]$subOrigin2[0];$subY2=[int]$subOrigin2[1]
-# Proven v8 Start center = submenu top +240px.
 $startX=$subX2+167;$startY=$subY2+240
 "START_CLICK_POINT: $startX,$startY"|Out-File $report -Append
 LeftClick $startX $startY
