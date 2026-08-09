@@ -6,8 +6,15 @@ from pathlib import Path
 
 SUPERSCRIPT = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹", "0123456789")
 
+# Standard XG candidate rows align source and move with two or more spaces.
 CANDIDATE_RE = re.compile(
     r"^\s*(\d+)\.\s+(.+?)\s{2,}(\S.*?)\s+eq:([+-]\d+\.\d+)"
+    r"(?:\s+\(([+-]\d+\.\d+)\))?\s*$"
+)
+# Fresh XG Roller++ rows are emitted with one space between the method label
+# and the move, for example: "1. XG Roller++ 13/7 8/4   eq:-0.537".
+XGRPP_CANDIDATE_RE = re.compile(
+    r"^\s*(\d+)\.\s+(XG Roller\+\+[⁰¹²³⁴⁵⁶⁷⁸⁹]*)\s+(\S.*?)\s+eq:([+-]\d+\.\d+)"
     r"(?:\s+\(([+-]\d+\.\d+)\))?\s*$"
 )
 PLAYER_RE = re.compile(
@@ -20,6 +27,10 @@ CONFIDENCE_RE = re.compile(
     r"^\s*Confidence:\s+±(\d+\.\d+)\s+\(([+-]\d+\.\d+)\.\.([+-]\d+\.\d+)\)"
     r"\s+-\s+\[(\d+\.\d+)%\]"
 )
+
+
+def candidate_match(line: str):
+    return XGRPP_CANDIDATE_RE.match(line) or CANDIDATE_RE.match(line)
 
 
 def pct(value: str) -> float:
@@ -80,7 +91,7 @@ def parse_export(text: str):
     if not score_match or not cube_match or not roll_match:
         raise ValueError("Required score/cube/on-roll header missing")
 
-    candidate_indexes = [i for i, line in enumerate(lines) if CANDIDATE_RE.match(line)]
+    candidate_indexes = [i for i, line in enumerate(lines) if candidate_match(line)]
     if not candidate_indexes:
         raise ValueError("No analyzed candidates found")
 
@@ -88,7 +99,7 @@ def parse_export(text: str):
     candidates = []
     for pos, line_index in enumerate(candidate_indexes):
         end = candidate_indexes[pos + 1] if pos + 1 < len(candidate_indexes) else len(lines)
-        match = CANDIDATE_RE.match(lines[line_index])
+        match = candidate_match(lines[line_index])
         rank, source, move, equity, delta = match.groups()
         candidate = {
             "rank": int(rank),
