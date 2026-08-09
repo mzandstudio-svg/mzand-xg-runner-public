@@ -22,6 +22,7 @@ jobs:
 
       - name: Build training-ready development labels
         run: |
+          mkdir -p development-teacher-corpus
           python scripts/build_development_teacher_corpus.py references development-teacher-corpus | tee development-teacher-corpus/build-summary.txt
 
       - name: Upload development teacher corpus
