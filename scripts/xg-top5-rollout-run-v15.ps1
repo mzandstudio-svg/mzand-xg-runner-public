@@ -45,7 +45,6 @@ function LeftClick([int]$x,[int]$y){
   [V15N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 70;[V15N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
 }
 
-# Reuse proven v8: Analyze Position, select exactly first five move rows, open Rollout submenu.
 function Stop-Process {
   [CmdletBinding()]
   param([Parameter(ValueFromPipeline=$true)]$InputObject,[string[]]$Name,[int[]]$Id,[switch]$Force)
@@ -60,7 +59,6 @@ $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
 $xg.Refresh();if($xg.HasExited){throw 'XG exited before rollout run'}
 $root=[System.Windows.Automation.AutomationElement]::RootElement
 
-# Exact proven Rollout submenu and exact preset row: Item 18 = Moves 3-ply, cube decisions XG Roller.
 $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 $subs=@()
 foreach($e in $all){try{$r=$e.Current.BoundingRectangle;if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ClassName-eq'#32768' -and $r.Width-gt300 -and $r.Height-gt300){$subs+=,$e}}catch{}}
@@ -75,10 +73,10 @@ LeftClick ([int]($pr.X+$pr.Width/2)) ([int]($pr.Y+$pr.Height/2))
 Post 'xg-top5-v15/preset' 'success' 'Preset Item 18 clicked: Moves 3-ply, cube decisions XG Roller'
 Start-Sleep 1
 
-# v14 evidence proved Item 18 opens the Rollout prompt directly with the correct preset text.
-$tops=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
+# The prompt is visible in UI Automation descendants on this runner image.
+$all2=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 $prompts=@()
-foreach($e in $tops){try{if($e.Current.ProcessId-eq$xg.Id -and $e.Current.Name-eq'Rollout' -and $e.Current.ClassName-eq'TPromptRollOutDlg'){$prompts+=,$e}}catch{}}
+foreach($e in $all2){try{if($e.Current.ProcessId-eq$xg.Id -and $e.Current.Name-eq'Rollout' -and $e.Current.ClassName-eq'TPromptRollOutDlg' -and $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Window){$prompts+=,$e}}catch{}}
 if($prompts.Count-ne1){Shot 'xg-top5-v15-prompt-missing';DumpUI 'xg-top5-v15-prompt-missing' $xg.Id;throw "Expected one Rollout prompt, got $($prompts.Count)"}
 $prompt=$prompts[0]
 $pdesc=$prompt.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
@@ -115,12 +113,12 @@ $xg.Refresh()
 "TITLE_30S: $($xg.MainWindowTitle)"|Out-File $report -Append
 Shot 'xg-top5-v15-after-ok-30s';DumpUI 'xg-top5-v15-after-ok-30s' $xg.Id
 
-$tops2=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
-foreach($e in $tops2){
+$all3=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+foreach($e in $all3){
   try{
-    if($e.Current.ProcessId-eq$xg.Id){
+    if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Window){
       $r=$e.Current.BoundingRectangle
-      "TOP_WINDOW_30S: Name=[$($e.Current.Name)] Class=[$($e.Current.ClassName)] Enabled=[$($e.Current.IsEnabled)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]"|Out-File $report -Append
+      "WINDOW_30S: Name=[$($e.Current.Name)] Class=[$($e.Current.ClassName)] Enabled=[$($e.Current.IsEnabled)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]"|Out-File $report -Append
     }
   }catch{}
 }
