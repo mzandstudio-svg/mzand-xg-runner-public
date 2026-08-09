@@ -15,6 +15,9 @@ public static class V15N {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string className, string windowName);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr childAfter, string className, string windowName);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 }
 "@
 function LeftClick([int]$x,[int]$y){[V15N]::SetCursorPos($x,$y)|Out-Null;Start-Sleep -Milliseconds 120;[V15N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 70;[V15N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)}
@@ -50,24 +53,19 @@ function InvokeAnalyzePosition(){
 function DismissDelayedSaveGame(){
   $deadline=(Get-Date).AddSeconds(30)
   while((Get-Date)-lt$deadline){
-    $root=[System.Windows.Automation.AutomationElement]::RootElement
-    $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-    foreach($w in $all){
-      try{
-        if($w.Current.ProcessId-ne$xg.Id){continue}
-        $name=[string]$w.Current.Name
-        if($name-eq'Save Game'){
-          $buttons=$w.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-          foreach($b in $buttons){
-            if($b.Current.Name-eq'No' -and $b.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button){
-              $p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-              ([System.Windows.Automation.InvokePattern]$p).Invoke()
-              Start-Sleep 2
-              return $true
-            }
-          }
-        }
-      }catch{}
+    $dialog=[V15N]::FindWindow($null,'Save Game')
+    if($dialog-ne[IntPtr]::Zero){
+      $noButton=[V15N]::FindWindowEx($dialog,[IntPtr]::Zero,'Button','No')
+      if($noButton-ne[IntPtr]::Zero){
+        [V15N]::SendMessage($noButton,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
+        Start-Sleep 2
+        if([V15N]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero){return $true}
+      }
+      [V15N]::SetForegroundWindow($dialog)|Out-Null
+      Start-Sleep -Milliseconds 250
+      [System.Windows.Forms.SendKeys]::SendWait('%n')
+      Start-Sleep 2
+      if([V15N]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero){return $true}
     }
     Start-Sleep -Milliseconds 500
   }
