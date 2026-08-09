@@ -53,12 +53,28 @@ Start-Sleep -Milliseconds 250
 RightClick $bestX $bestY
 Start-Sleep 1
 Shot "$env:GITHUB_WORKSPACE\xg-v15-context-before-xgrpp.png"
-$xgrX=$wr.Left+230;$xgrY=$wr.Top+448
+
+$root=[System.Windows.Automation.AutomationElement]::RootElement
+$all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+$items=@()
+foreach($e in $all){
+  try{
+    if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::MenuItem -and $e.Current.Name-eq'XG Roller++' -and -not$e.Current.IsOffscreen){$items+=,$e}
+  }catch{}
+}
+if($items.Count-ne1){
+  "XGRPP_MENU_ITEM_COUNT: $($items.Count)"|Out-File $report15 -Append
+  Shot "$env:GITHUB_WORKSPACE\xg-v15-xgrpp-item-mismatch.png"
+  throw "Expected exactly one visible XG Roller++ menu item, got $($items.Count)"
+}
+$ir=$items[0].Current.BoundingRectangle
+$xgrX=[int]($ir.X+$ir.Width/2);$xgrY=[int]($ir.Y+$ir.Height/2)
+"XGRPP_MENU_ITEM_RECT: $($ir.X),$($ir.Y),$($ir.Width),$($ir.Height)"|Out-File $report15 -Append
 "XGRPP_CLICK_POINT: $xgrX,$xgrY"|Out-File $report15 -Append
 LeftClick $xgrX $xgrY
 'XGRPP_COMMAND_CLICKED: True'|Out-File $report15 -Append
 'ROLLOUT_MENU_COMMAND_CLICKED: False'|Out-File $report15 -Append
-Post 'xg-public-v15/xgrpp-started' 'success' 'XG Roller++ clicked for current top candidate'
+Post 'xg-public-v15/xgrpp-started' 'success' 'Exact XG Roller++ menu item clicked'
 
 $complete=$false
 $elapsed=0
