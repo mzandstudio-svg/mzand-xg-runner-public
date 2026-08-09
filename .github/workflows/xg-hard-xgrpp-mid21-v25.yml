@@ -1,0 +1,147 @@
+name: XG Hard Position XGR++ mid21 v25
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-hard-xgrpp-mid21-v25.yml
+      - scripts/xg-parallel-candidate-xgrpp-v25.ps1
+      - scripts/aggregate_xgrpp_screening.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: xg-v25-mid21-xgrpp-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  POSITION_ID: mid21
+  POSITION_XGID: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:21:6:16:0:19:10
+
+jobs:
+  xgrpp-candidate:
+    name: mid21-xgrpp-${{ matrix.rank }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        rank: [1,2,3,4,5]
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
+          Post "xg-v25/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+          Post "xg-v25/candidate-$env:CANDIDATE_RANK/runner" 'pending' "mid21 XGR++ candidate $env:CANDIDATE_RANK runner started"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if(Test-Path $log){Copy-Item $log "$env:GITHUB_WORKSPACE\xg-install-v25-c${{ matrix.rank }}.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw 'XG executable missing'}
+          "xgexe=$exe"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven startup XGID
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Switch to mined hard position
+        shell: powershell
+        run: ./scripts/xg-switch-position-v24.ps1
+
+      - name: Evaluate one candidate with XG Roller++
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+        run: ./scripts/xg-parallel-candidate-xgrpp-v25.ps1
+
+      - name: Upload candidate screening record
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v25-mid21-candidate-${{ matrix.rank }}
+          path: |
+            xg-v18-candidate-${{ matrix.rank }}-report.txt
+            xg-v18-candidate-${{ matrix.rank }}-baseline.txt
+            xg-v18-candidate-${{ matrix.rank }}-baseline.json
+            xg-v18-candidate-${{ matrix.rank }}-final.txt
+            xg-v18-candidate-${{ matrix.rank }}-xgrpp.json
+            xg-v18-candidate-${{ matrix.rank }}-*.png
+            xg-v24-switch-mid21-report.txt
+            xg-install-v25-c${{ matrix.rank }}.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish candidate final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: ${{ matrix.rank }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          $state=if($env:JOB_STATUS-eq'success'){'success'}else{'failure'}
+          $payload=@{state=$state;context="xg-v25/candidate-$env:CANDIDATE_RANK/job";description="candidate $env:CANDIDATE_RANK job=$env:JOB_STATUS"}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          $payload=@{state='success';context="xg-v25/candidate-$env:CANDIDATE_RANK/runner";description='runner reached final status'}|ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+
+  aggregate-screening:
+    name: aggregate-mid21-xgrpp
+    needs: xgrpp-candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download five screening records
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xg-v25-mid21-candidate-*
+          path: artifacts
+          merge-multiple: true
+      - name: Aggregate XGR++ screening label
+        run: |
+          python scripts/aggregate_xgrpp_screening.py artifacts xg-v25-mid21-screening.json | tee xg-v25-mid21-summary.txt
+      - name: Upload hard-position XGR++ audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v25-mid21-xgrpp-audit
+          path: |
+            xg-v25-mid21-screening.json
+            xg-v25-mid21-summary.txt
+          retention-days: 30
+      - name: Publish screening gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          d=json.load(open('xg-v25-mid21-screening.json'))
+          desc=f"mid21 XGR++ best={d['best_move']}; gap={d['top1_gap']:.3f}; fresh={d['fresh_xgrpp_count']}"
+          payload=json.dumps({'state':'success','context':'xg-v25/mid21-screening','description':desc}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
