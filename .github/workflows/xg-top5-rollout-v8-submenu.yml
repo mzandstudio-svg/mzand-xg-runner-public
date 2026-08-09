@@ -1,4 +1,4 @@
-name: XG Top5 Rollout v8 Submenu
+name: XG Top5 Rollout v8 Submenu Retry
 
 on:
   push:
