@@ -24,48 +24,52 @@ function Shot([string]$name){$b=[System.Windows.Forms.SystemInformation]::Virtua
 function DumpDesktop([string]$name){$root=[System.Windows.Automation.AutomationElement]::RootElement;$all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition);$lines=New-Object 'System.Collections.Generic.List[string]';foreach($e in $all){try{$r=$e.Current.BoundingRectangle;if($e.Current.ProcessId-eq$script:xg.Id -or $e.Current.ClassName-eq'#32768' -or $e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Window){$lines.Add("PID=[$($e.Current.ProcessId)] Name=[$($e.Current.Name)] Type=[$($e.Current.ControlType.ProgrammaticName)] Class=[$($e.Current.ClassName)] Id=[$($e.Current.AutomationId)] Enabled=[$($e.Current.IsEnabled)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]")}}catch{}};$lines|Out-File "$env:GITHUB_WORKSPACE\$name-ui.txt" -Encoding utf8}
 function LeftClick([int]$x,[int]$y){[R10N]::SetCursorPos($x,$y)|Out-Null;Start-Sleep -Milliseconds 100;[R10N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 60;[R10N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)}
 function RightClick([int]$x,[int]$y){[R10N]::SetCursorPos($x,$y)|Out-Null;Start-Sleep -Milliseconds 100;[R10N]::mouse_event(8,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 60;[R10N]::mouse_event(16,0,0,0,[UIntPtr]::Zero)}
-function PopupPair {
-  $root=[System.Windows.Automation.AutomationElement]::RootElement
-  $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-  $pops=@()
-  foreach($m in $all){try{if($m.Current.ProcessId-eq$script:xg.Id -and $m.Current.ClassName-eq'#32768'){$r=$m.Current.BoundingRectangle;if($r.Width-gt200 -and $r.Height-gt300){$pops+=,$m}}}catch{}}
-  return @($pops|Sort-Object{try{$_.Current.BoundingRectangle.X}catch{99999}})
-}
-function OpenRolloutSubmenu([int]$x,[int]$y){
-  RightClick $x $y;Start-Sleep -Milliseconds 700
-  $p=PopupPair;if($p.Count-lt1){throw 'Context popup missing'}
-  $cr=$p[0].Current.BoundingRectangle
-  [R10N]::SetCursorPos([int]($cr.X+$cr.Width/2),[int]($cr.Y+221))|Out-Null
+function HoverRollout([int]$rowX,[int]$row5Y){
+  RightClick $rowX $row5Y
+  Start-Sleep -Milliseconds 700
+  # Proven v7/v8 geometry: context popup left=rowX; popup bottom=row5Y; height=424; Rollout center offset +114,+221 from popup top.
+  $contextTop=$row5Y-424
+  $rollX=$rowX+114
+  $rollY=$contextTop+221
+  [R10N]::SetCursorPos($rollX,$rollY)|Out-Null
   Start-Sleep 1
-  $p=PopupPair;if($p.Count-lt2){throw 'Rollout submenu missing'}
-  return $p[1]
+  return @($rowX+222,$contextTop+209)
 }
 
 $report="$env:GITHUB_WORKSPACE\xg-top5-v10-report.txt"
-'XG Top5 Rollout v10 Explicit Preset Prompt'|Out-File $report
+'XG Top5 Rollout v10 Explicit Preset Prompt Geometry'|Out-File $report
 $script:xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
 $script:xg.Refresh();if($script:xg.MainWindowTitle-notlike'*Position.xgp*'){throw 'Position.xgp not ready'}
 $hwnd=[IntPtr]$script:xg.MainWindowHandle;$main=[R10N]::GetMenu($hwnd);$analyze=[R10N]::GetSubMenu($main,4);$positionId=[R10N]::GetMenuItemID($analyze,1)
 if($positionId-eq[uint32]::MaxValue){throw 'Analyze Position command unavailable'}
 [R10N]::SetForegroundWindow($hwnd)|Out-Null;Start-Sleep -Milliseconds 250;[void][R10N]::SendMessage($hwnd,0x0111,[IntPtr]([int]$positionId),[IntPtr]::Zero)
 Post 'xg-top5-v10/position-command' 'success' 'Analyze Position sent';Start-Sleep 15
+
 $wr=New-Object R10N+RECT;if(-not[R10N]::GetWindowRect($hwnd,[ref]$wr)){throw 'GetWindowRect failed'}
+$width=$wr.Right-$wr.Left;$height=$wr.Bottom-$wr.Top
+"WINDOW_RECT: $($wr.Left),$($wr.Top),$($wr.Right),$($wr.Bottom)"|Out-File $report -Append
+if($width-ne924 -or $height-ne668){throw "Unexpected XG window geometry ${width}x${height}; refusing coordinate rollout selection"}
 $x=[int]$wr.Left+130;$ys=@(([int]$wr.Top+370),([int]$wr.Top+413),([int]$wr.Top+456),([int]$wr.Top+499),([int]$wr.Top+542))
 LeftClick $x $ys[0];[R10N]::keybd_event(0x11,0,0,[UIntPtr]::Zero);try{for($i=1;$i-lt5;$i++){LeftClick $x $ys[$i]}}finally{[R10N]::keybd_event(0x11,0,2,[UIntPtr]::Zero)}
 Start-Sleep -Milliseconds 500;Shot 'xg-top5-v10-selected-five'
 
-$sub=OpenRolloutSubmenu $x $ys[4];$sr=$sub.Current.BoundingRectangle
-"FIRST_SUBMENU_RECT: $($sr.X),$($sr.Y),$($sr.Width),$($sr.Height)"|Out-File $report -Append
-# Explicitly select fourth preset: Moves 3-ply, cube decisions XG Roller.
-$presetX=[int]($sr.X+$sr.Width/2);$presetY=[int]($sr.Y+69)
+$subOrigin=HoverRollout $x $ys[4]
+Shot 'xg-top5-v10-submenu-before-preset'
+$subX=[int]$subOrigin[0];$subY=[int]$subOrigin[1]
+# Proven v8 submenu: first preset center offset 12, then 19px rows. Fourth preset center = +69px.
+$presetX=$subX+167;$presetY=$subY+69
 "PRESET4_CLICK_POINT: $presetX,$presetY"|Out-File $report -Append
 LeftClick $presetX $presetY
 'PRESET4_CLICKED: True'|Out-File $report -Append
-Post 'xg-top5-v10/preset4' 'success' 'Explicit fourth rollout preset selected'
+Post 'xg-top5-v10/preset4' 'success' 'Explicit fourth rollout preset clicked'
 Start-Sleep -Milliseconds 700
 
-$sub2=OpenRolloutSubmenu $x $ys[4];$sr2=$sub2.Current.BoundingRectangle
-$startX=[int]($sr2.X+$sr2.Width/2);$startY=[int]($sr2.Y+240)
+$subOrigin2=HoverRollout $x $ys[4]
+Shot 'xg-top5-v10-submenu-after-preset'
+$subX2=[int]$subOrigin2[0];$subY2=[int]$subOrigin2[1]
+# Proven v8 Start center = submenu top +240px.
+$startX=$subX2+167;$startY=$subY2+240
+"START_CLICK_POINT: $startX,$startY"|Out-File $report -Append
 LeftClick $startX $startY
 'START_CLICKED_AFTER_PRESET4: True'|Out-File $report -Append
 Post 'xg-top5-v10/start' 'success' 'Start clicked after explicit preset4'
