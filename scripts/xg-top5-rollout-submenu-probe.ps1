@@ -84,14 +84,18 @@ RightClick $x $ys[4]
 Start-Sleep -Milliseconds 700
 
 $root=[System.Windows.Automation.AutomationElement]::RootElement
-$menus=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,(New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Menu))
+$all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
 $context=$null
-foreach($m in $menus){
-  try{if($m.Current.ProcessId-eq$script:xg.Id -and $m.Current.ClassName-eq'#32768'){$context=$m;break}}catch{}
+foreach($m in $all){
+  try{
+    if($m.Current.ProcessId-eq$script:xg.Id -and $m.Current.ControlType-eq[System.Windows.Automation.ControlType]::Menu -and $m.Current.ClassName-eq'#32768'){$context=$m;break}
+  }catch{}
 }
 if($null-eq$context){Shot 'xg-top5-v8-no-context-menu';DumpMenus 'xg-top5-v8-no-context-menu';throw 'Context menu not found'}
-$items=$context.FindAll([System.Windows.Automation.TreeScope]::Children,(New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::MenuItem))
-$ordered=@($items|Sort-Object{try{$_.Current.BoundingRectangle.Y}catch{99999}})
+$children=$context.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
+$menuItems=@()
+foreach($child in $children){try{if($child.Current.ControlType-eq[System.Windows.Automation.ControlType]::MenuItem){$menuItems+=,$child}}catch{}}
+$ordered=@($menuItems|Sort-Object{try{$_.Current.BoundingRectangle.Y}catch{99999}})
 "CONTEXT_MENU_ITEM_COUNT: $($ordered.Count)"|Out-File $report -Append
 if($ordered.Count-lt12){Shot 'xg-top5-v8-too-few-context-items';DumpMenus 'xg-top5-v8-too-few-context-items';throw "Expected at least 12 context items, got $($ordered.Count)"}
 $rolloutItem=$ordered[11]
