@@ -71,7 +71,7 @@ def analysis_method(source: str, note: str | None):
     return source
 
 
-def parse_export(text: str):
+def parse_export(text: str, allow_partial: bool = False):
     lines = text.splitlines()
 
     xgid_match = re.search(r"^XGID=(.+)$", text, re.MULTILINE)
@@ -143,12 +143,21 @@ def parse_export(text: str):
             candidate["provenance"] = note
         candidates.append(candidate)
 
-    expected_ranks = list(range(1, len(candidates) + 1))
     actual_ranks = [item["rank"] for item in candidates]
-    if actual_ranks != expected_ranks:
+    expected_ranks = list(range(1, len(candidates) + 1))
+    partial_export = actual_ranks != expected_ranks
+    if partial_export and not allow_partial:
         raise ValueError(f"Candidate ranks are not sequential: {actual_ranks}")
+    if actual_ranks != sorted(set(actual_ranks)):
+        raise ValueError(f"Candidate ranks are not strictly increasing: {actual_ranks}")
 
-    best_equity = candidates[0]["equity"]
+    rank_one = next((item for item in candidates if item["rank"] == 1), None)
+    if rank_one is not None:
+        best_equity = rank_one["equity"]
+    else:
+        reference = candidates[0]
+        best_equity = reference["equity"] - reference["equity_delta"]
+
     for candidate in candidates:
         win_sum = candidate["player"]["win"] + candidate["opponent"]["win"]
         if abs(win_sum - 1.0) > 0.002:
@@ -183,6 +192,8 @@ def parse_export(text: str):
         "on_roll": roll_match.group(1),
         "dice": [int(roll_match.group(2)), int(roll_match.group(3))],
         "candidate_count": len(candidates),
+        "partial_candidate_export": partial_export,
+        "candidate_ranks": actual_ranks,
         "candidates": candidates,
         "xg_version": version_match.group(1).strip() if version_match else None,
     }
@@ -193,12 +204,18 @@ def main():
     parser = argparse.ArgumentParser(description="Parse eXtreme Gammon position clipboard export")
     parser.add_argument("input", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="accept candidate exports with a temporarily omitted selected row",
+    )
     args = parser.parse_args()
 
     text = args.input.read_text(encoding="utf-8-sig")
-    data = parse_export(text)
+    data = parse_export(text, allow_partial=args.allow_partial)
     args.output.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"parsed_candidates={data['candidate_count']}")
+    print(f"candidate_ranks={','.join(str(rank) for rank in data['candidate_ranks'])}")
     print(f"best_move={data['candidates'][0]['move']}")
     print(f"best_equity={data['candidates'][0]['equity']:+.3f}")
     print(f"best_method={data['candidates'][0]['analysis_method']}")
