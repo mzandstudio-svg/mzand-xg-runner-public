@@ -135,8 +135,8 @@ jobs:
 
           $wr=New-Object V7N+RECT
           if(-not[V7N]::GetWindowRect($hwnd,[ref]$wr)){throw 'GetWindowRect failed'}
-          $x=$wr.Left+130
-          $ys=@($wr.Top+370,$wr.Top+413,$wr.Top+456,$wr.Top+499,$wr.Top+542)
+          $x=[int]$wr.Left+130
+          $ys=@(([int]$wr.Top+370),([int]$wr.Top+413),([int]$wr.Top+456),([int]$wr.Top+499),([int]$wr.Top+542))
           "WINDOW_RECT: $($wr.Left),$($wr.Top),$($wr.Right),$($wr.Bottom)"|Out-File $report -Append
           "TOP5_CLICK_X: $x"|Out-File $report -Append
           "TOP5_CLICK_YS: $($ys -join ',')"|Out-File $report -Append
