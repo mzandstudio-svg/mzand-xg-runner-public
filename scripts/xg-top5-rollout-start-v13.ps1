@@ -45,8 +45,6 @@ function LeftClick([int]$x,[int]$y){
   [V13N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 70;[V13N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
 }
 
-# Reuse the proven v8 path to analyze the position, select exactly the first five rows,
-# right-click them, and hover Rollout. Suppress only its final process cleanup.
 function Stop-Process {
   [CmdletBinding()]
   param(
@@ -88,22 +86,22 @@ $desc=$sub.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Wi
 $startCandidates=@()
 foreach($e in $desc){
   try{
-    if($e.Current.ControlType-eq[System.Windows.Automation.ControlType]::MenuItem -and $e.Current.AutomationId-eq'Item 28'){$startCandidates+=,$e}
+    if($e.Current.ControlType-eq[System.Windows.Automation.ControlType]::MenuItem -and $e.Current.AutomationId-eq'Item 27'){$startCandidates+=,$e}
   }catch{}
 }
-if($startCandidates.Count-ne1){Shot 'xg-top5-v13-start-id-mismatch';DumpUI 'xg-top5-v13-start-id-mismatch' $xg.Id;throw "Expected exact Start AutomationId Item 28 once, got $($startCandidates.Count)"}
+if($startCandidates.Count-ne1){Shot 'xg-top5-v13-start-id-mismatch';DumpUI 'xg-top5-v13-start-id-mismatch' $xg.Id;throw "Expected exact Start AutomationId Item 27 once, got $($startCandidates.Count)"}
 $startItem=$startCandidates[0]
 $rr=$startItem.Current.BoundingRectangle
 $delta=[int]($rr.Y-$sr.Y)
 "START_AUTOMATION_ID: $($startItem.Current.AutomationId)"|Out-File $report -Append
 "START_ITEM_RECT: $($rr.X),$($rr.Y),$($rr.Width),$($rr.Height)"|Out-File $report -Append
 "START_ITEM_Y_DELTA: $delta"|Out-File $report -Append
-if($rr.Width-lt300 -or $rr.Height-lt15 -or $delta-lt245 -or $delta-gt260){Shot 'xg-top5-v13-start-geometry-mismatch';DumpUI 'xg-top5-v13-start-geometry-mismatch' $xg.Id;throw "Start geometry mismatch delta=$delta"}
+if($rr.Width-lt300 -or $rr.Height-lt15 -or $delta-lt225 -or $delta-gt240){Shot 'xg-top5-v13-start-geometry-mismatch';DumpUI 'xg-top5-v13-start-geometry-mismatch' $xg.Id;throw "Start geometry mismatch delta=$delta"}
 
 $cx=[int]($rr.X+$rr.Width/2);$cy=[int]($rr.Y+$rr.Height/2)
 LeftClick $cx $cy
 'ROLLOUT_START_CLICKED: True'|Out-File $report -Append
-Post 'xg-top5-v13/start-clicked' 'success' "Exact Rollout Start Item 28 clicked at $cx,$cy"
+Post 'xg-top5-v13/start-clicked' 'success' "Exact Rollout Start Item 27 clicked at $cx,$cy"
 
 Start-Sleep -Milliseconds 900
 Shot 'xg-top5-v13-after-start-1s';DumpUI 'xg-top5-v13-after-start-1s' $xg.Id
