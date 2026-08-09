@@ -1,0 +1,41 @@
+{
+  "schema": "mzand.xg.teacher-label.v2",
+  "xgid": "XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:31:6:16:0:19:10",
+  "xgid_payload": "-a---BDBBA--dBb--c-dBa----:1:-1:-1:31:6:16:0:19:10",
+  "score": {"x": 16, "o": 6, "match_length": 19},
+  "cube": 2,
+  "on_roll": "X",
+  "dice": [3, 1],
+  "xg_version": "2.10, MET: Kazaross XG2",
+  "teacher": {
+    "candidate_generation": "XG Analyze Position Top-5",
+    "label_method": "Independent 1296-game rollout per candidate",
+    "checker_preset": "Moves 3-ply",
+    "cube_preset": "XG Roller",
+    "variance_reduction": true
+  },
+  "candidate_count": 5,
+  "best_move": "8/4",
+  "best_equity": -0.565,
+  "candidates": [
+    {"move":"8/4","equity":-0.565,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":1,"rollout_games":1296,"rollout_rank":1},
+    {"move":"6/3 4/3","equity":-0.585,"confidence":{"plus_minus_equity":0.006},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":2,"rollout_games":1296,"rollout_rank":2},
+    {"move":"13/9","equity":-0.652,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":3,"rollout_games":1296,"rollout_rank":3},
+    {"move":"24/21 4/3","equity":-0.666,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":4,"rollout_games":1296,"rollout_rank":4},
+    {"move":"24/23 6/3","equity":-0.670,"confidence":{"plus_minus_equity":0.007},"analysis_method":"Rollout","provenance":"1296 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller","original_analysis_rank":5,"rollout_games":1296,"rollout_rank":5}
+  ],
+  "adaptive_depth": {
+    "gap": 0.020,
+    "best_confidence_pm": 0.007,
+    "second_confidence_pm": 0.006,
+    "margin": 0.005,
+    "decision_threshold": 0.018,
+    "current_games": 1296,
+    "accept_current_depth": true,
+    "next_games": 1296,
+    "reason": "decisive_gap"
+  },
+  "source_run_id": 31340531587,
+  "source_commit": "6a68cd99f40292cc901c74cef8e0245030e18c59",
+  "source_artifact_id": 9045776552
+}
