@@ -3,8 +3,8 @@ $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-parallel-candidate-rollout-
 $src=Get-Content $srcPath -Raw
 
 # Non-book XGID imports can retain an unsaved game shell. Analyze -> Position then
-# raises a modal Save Game prompt. Dismiss it explicitly with No before waiting for
-# analyzed-candidate export. Opening-book Position.xgp controls do not always show it.
+# raises a modal Save Game prompt. Delphi does not reliably expose its child buttons
+# through UI Automation, so validate the prompt window and click the relative No slot.
 $oldAnalysis=@'
 Start-Sleep 15
 Post "$prefix/analyzed" 'success' 'Analyze Position completed for candidate selection'
@@ -29,17 +29,18 @@ for($saveWait=0;$saveWait-lt20;$saveWait++){
   if($saveDialogs.Count-eq1){
     $savePromptSeen=$true
     $dlg=$saveDialogs[0]
-    $children=$dlg.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-    $noButtons=@()
-    foreach($e in $children){
-      try{
-        if($e.Current.ControlType-eq[System.Windows.Automation.ControlType]::Button -and $e.Current.Name-eq'No' -and $e.Current.IsEnabled){$noButtons+=,$e}
-      }catch{}
+    $dr=$dlg.Current.BoundingRectangle
+    "SAVE_GAME_PROMPT_RECT: $($dr.X),$($dr.Y),$($dr.Width),$($dr.Height)"|Out-File $report -Append
+    if($dr.Width-lt330 -or $dr.Width-gt390 -or $dr.Height-lt120 -or $dr.Height-gt170){
+      Shot "$prefix-save-prompt-geometry-invalid"
+      throw "Unexpected Save Game dialog geometry $($dr.Width)x$($dr.Height)"
     }
-    if($noButtons.Count-ne1){Shot "$prefix-save-prompt-no-mismatch";throw "Expected one enabled No button in Save Game dialog, got $($noButtons.Count)"}
-    $nr=$noButtons[0].Current.BoundingRectangle
+    # Verified screenshot: No is the middle button at ~66% width / 85% height.
+    $noX=[int]($dr.X+($dr.Width*0.66))
+    $noY=[int]($dr.Y+($dr.Height*0.85))
+    "SAVE_GAME_NO_GEOMETRY_CLICK: $noX,$noY"|Out-File $report -Append
     Shot "$prefix-save-prompt-before-no"
-    LeftClick ([int]($nr.X+$nr.Width/2)) ([int]($nr.Y+$nr.Height/2))
+    LeftClick $noX $noY
     $savePromptDismissed=$true
     "SAVE_GAME_PROMPT_NO_CLICKED: True"|Out-File $report -Append
     Post "$prefix/save-prompt" 'success' 'Unsaved-game Save Game prompt dismissed with No'
