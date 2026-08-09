@@ -1,4 +1,4 @@
-name: XG Top5 Rollout v13 Start Probe
+name: XG Top5 Rollout v13 Exact Start
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   statuses: write
 
 jobs:
-  rollout-start-probe:
+  exact-start:
     runs-on: windows-latest
     timeout-minutes: 35
     steps:
@@ -27,7 +27,7 @@ jobs:
             $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
             Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
           }
-          Post 'xg-top5-v13/runner-start' 'pending' 'Public Windows runner started'
+          Post 'xg-top5-v13/runner-start' 'pending' 'Public Windows runner started v13'
           Post "xg-top5-v13/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
 
       - uses: actions/checkout@v4
@@ -50,90 +50,18 @@ jobs:
         shell: powershell
         run: ./scripts/xg-reach-xgid.ps1
 
-      - name: Select top five and click Rollout Start
+      - name: Exact Rollout Start and capture prompt
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
           GATE_SHA: ${{ github.sha }}
-        run: |
-          $ErrorActionPreference='Stop'
-          Add-Type -AssemblyName UIAutomationClient
-          Add-Type -AssemblyName UIAutomationTypes
-
-          # Suppress only the proven v8 helper's final cleanup so its open submenu survives.
-          function Stop-Process {
-            [CmdletBinding()]
-            param(
-              [Parameter(ValueFromPipeline=$true)]$InputObject,
-              [string[]]$Name,
-              [int[]]$Id,
-              [switch]$Force
-            )
-            process { }
-          }
-          . ./scripts/xg-top5-rollout-submenu-probe.ps1
-          Remove-Item Function:\Stop-Process -Force
-
-          $report="$env:GITHUB_WORKSPACE\xg-top5-v13-report.txt"
-          'XG Top5 Rollout v13 Start Probe'|Out-File $report
-          $xg=$script:xg
-          if($null-eq$xg){throw 'Proven helper did not preserve XG process object'}
-          if($xg.HasExited){throw 'XG exited before Start probe'}
-          "XG_PID: $($xg.Id)"|Out-File $report -Append
-          "XG_HANDLE_CACHED: $($xg.MainWindowHandle)"|Out-File $report -Append
-          Post 'xg-top5-v13/top-five-ready' 'success' 'Proven helper selected five and opened Rollout submenu'
-
-          $root=[System.Windows.Automation.AutomationElement]::RootElement
-          $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-          $subs=@()
-          foreach($e in $all){
-            try{
-              $r=$e.Current.BoundingRectangle
-              if($e.Current.ProcessId-eq$xg.Id -and $e.Current.ClassName-eq'#32768' -and $r.Width-gt300 -and $r.Height-gt300){$subs+=,$e}
-            }catch{}
-          }
-          "ROLLOUT_SUBMENU_CANDIDATES: $($subs.Count)"|Out-File $report -Append
-          if($subs.Count-ne1){Shot 'xg-top5-v13-submenu-mismatch';DumpMenus 'xg-top5-v13-submenu-mismatch';throw "Expected one large Rollout submenu, got $($subs.Count)"}
-          $sr=$subs[0].Current.BoundingRectangle
-          "ROLLOUT_SUBMENU_RECT: $($sr.X),$($sr.Y),$($sr.Width),$($sr.Height)"|Out-File $report -Append
-          if($sr.Width-lt320 -or $sr.Height-lt370){throw 'Rollout submenu geometry outside proven range'}
-
-          # Proven v8 screenshot/UI tree: Start row center is popup top + ~240px.
-          $cx=[int]($sr.X+110)
-          $cy=[int]($sr.Y+240)
-          "START_CLICK_POINT: $cx,$cy"|Out-File $report -Append
-          LeftClick $cx $cy
-          'ROLLOUT_START_CLICKED: True'|Out-File $report -Append
-          Post 'xg-top5-v13/start-clicked' 'success' "Rollout Start clicked at $cx,$cy"
-
-          Start-Sleep -Milliseconds 900
-          Shot 'xg-top5-v13-after-start-1s'
-          DumpMenus 'xg-top5-v13-after-start-1s'
-          Start-Sleep 3
-          Shot 'xg-top5-v13-after-start-4s'
-          DumpMenus 'xg-top5-v13-after-start-4s'
-
-          $tops=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
-          $dialogs=@()
-          foreach($e in $tops){
-            try{
-              if($e.Current.ProcessId-eq$xg.Id){
-                $r=$e.Current.BoundingRectangle
-                "TOP: Name=[$($e.Current.Name)] Class=[$($e.Current.ClassName)] Handle=[$($e.Current.NativeWindowHandle)] Enabled=[$($e.Current.IsEnabled)] Rect=[$($r.X),$($r.Y),$($r.Width),$($r.Height)]"|Out-File $report -Append
-                if($e.Current.ClassName-ne'TXGMainForm'){$dialogs+=,$e}
-              }
-            }catch{}
-          }
-          "POST_START_NON_MAIN_TOP_WINDOWS: $($dialogs.Count)"|Out-File $report -Append
-          Post 'xg-top5-v13/post-start-captured' 'success' "Captured post-Start state; non-main windows=$($dialogs.Count)"
-          Get-Content $report
-          Microsoft.PowerShell.Management\Stop-Process -Name eXtremeGammon2,test3d -Force -ErrorAction SilentlyContinue
+        run: ./scripts/xg-top5-rollout-start-v13.ps1
 
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: xg-top5-rollout-v13-start-probe
+          name: xg-top5-rollout-v13-exact-start
           path: |
             xg-install.log
             xg-reach-xgid-report.txt
@@ -162,6 +90,6 @@ jobs:
             Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
           }
           $ok=Test-Path "$env:GITHUB_WORKSPACE\xg-top5-v13-after-start-4s.png"
-          Post 'xg-top5-v13/evidence' ($(if($ok){'success'}else{'failure'})) "post-Start evidence=$ok"
+          Post 'xg-top5-v13/evidence' ($(if($ok){'success'}else{'failure'})) "exact Start evidence=$ok"
           Post 'xg-top5-v13/job' ($(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})) "job=$env:JOB_STATUS"
           Post 'xg-top5-v13/runner-start' 'success' 'runner reached final status'
