@@ -1,0 +1,22 @@
+{
+  "schema": "mzand.xg.teacher-reference.v1",
+  "xgid": "XGID=-b----E-C---eE---c-e----B-:0:0:1:51:7:10:0:11:10",
+  "teacher_method": "Independent 1296-game rollout per candidate",
+  "checker_preset": "Moves 3-ply",
+  "cube_preset": "XG Roller",
+  "variance_reduction": true,
+  "best_move": "24/23 13/8",
+  "best_equity": 0.918,
+  "candidates": [
+    {"rollout_rank":1,"original_analysis_rank":1,"move":"24/23 13/8","equity":0.918,"confidence_pm":0.007},
+    {"rollout_rank":2,"original_analysis_rank":2,"move":"24/18","equity":0.871,"confidence_pm":0.011},
+    {"rollout_rank":3,"original_analysis_rank":3,"move":"13/8 6/5","equity":0.871,"confidence_pm":0.009},
+    {"rollout_rank":4,"original_analysis_rank":4,"move":"13/7","equity":0.862,"confidence_pm":0.010},
+    {"rollout_rank":5,"original_analysis_rank":5,"move":"24/23 8/3","equity":0.817,"confidence_pm":0.012}
+  ],
+  "adaptive_depth": {
+    "gap_best_to_second": 0.047,
+    "ci_sum_best_second": 0.018,
+    "deeper_rollout_required": false
+  }
+}
