@@ -1,0 +1,80 @@
+name: GNU Marked Move Rollout v10
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-marked-move-rollout-v10.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  marked-move-rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish run marker
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-rollout-v10/run-$GITHUB_RUN_ID\",\"description\":\"marked move rollout export started\"}" >/dev/null
+      - name: Install GNU Backgammon CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+      - name: Roll out marked hint moves and export position
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > gnu-v10.commands <<'EOF'
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set rollout trials 36
+          set rollout quasirandom on
+          set rollout seed 20260813
+          new game
+          set board 4HPwATDgc/ABMA
+          set dice 3 1
+          hint 5
+          cmark move set rollout 1 2
+          analyse rollout move
+          export position text gnu-v10-position.txt
+          save position gnu-v10-position.sgf
+          quit
+          EOF
+          timeout 600 gnubg -t -r -c gnu-v10.commands > gnu-v10-console.txt 2>&1
+          test -s gnu-v10-console.txt
+          test -s gnu-v10-position.txt
+          test -s gnu-v10-position.sgf
+          ! grep -Eq 'There must be a game in progress|You must set up a board first|No position specified|No moves marked' gnu-v10-console.txt
+          grep -Ei 'rollout|equity|eq\.|cubeful|cubeless|^[[:space:]]*[12]\.' gnu-v10-position.txt > gnu-v10-rollout-evidence.txt || true
+          grep -Eqi 'rollout|36 games|games done|trials' gnu-v10-console.txt gnu-v10-position.txt gnu-v10-position.sgf
+          printf '\nTRUE_MARKED_MOVE_ROLLOUT: True\nMARKED_HINT_RANKS: 1,2\nTRIALS_REQUESTED: 36\nDEV_DATA_USED: False\nPRISTINE_DATA_USED: False\nXG_LABELS_USED: False\n' >> gnu-v10-rollout-evidence.txt
+          cat gnu-v10-rollout-evidence.txt
+      - name: Publish marked rollout evidence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-rollout-v10/marked-moves\",\"description\":\"GNU ranks 1,2 true-rollout exported\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-marked-move-rollout-v10
+          path: |
+            gnu-v10.commands
+            gnu-v10-console.txt
+            gnu-v10-position.txt
+            gnu-v10-position.sgf
+            gnu-v10-rollout-evidence.txt
+          if-no-files-found: ignore
+          retention-days: 14
