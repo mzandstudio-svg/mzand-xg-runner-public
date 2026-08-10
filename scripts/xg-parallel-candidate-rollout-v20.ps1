@@ -18,33 +18,34 @@ if($requestedGames-notin@(1296,5184)){throw "ROLLOUT_GAMES must be 1296 or 5184,
 if($requestedGames-ne1296){
   $gameText=[string]$requestedGames
   $gameControlMarker='Shot "$prefix-before-ok"'
-  $gameControlBlock=@'
-$pdesc=$prompt.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-$gameSpins=@()
-foreach($e in $pdesc){try{if($e.Current.ClassName-eq'TSpinEditX'){$gameSpins+=,$e}}catch{}}
-if($gameSpins.Count-ne1){Shot "$prefix-games-control-mismatch";throw "Expected one rollout games control, got $($gameSpins.Count)"}
-$gameSpin=$gameSpins[0]
-$gameSet=$false
-try{
-  $valuePattern=[System.Windows.Automation.ValuePattern]$gameSpin.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-  $valuePattern.SetValue('__GAMES__')
-  $gameSet=$true
-}catch{}
-if(-not$gameSet){
-  $gr=$gameSpin.Current.BoundingRectangle
-  LeftClick ([int]($gr.X+$gr.Width/2)) ([int]($gr.Y+$gr.Height/2))
-  Start-Sleep -Milliseconds 150
-  [System.Windows.Forms.SendKeys]::SendWait('^a')
-  Start-Sleep -Milliseconds 100
-  [System.Windows.Forms.SendKeys]::SendWait('__GAMES__')
-}
-Start-Sleep -Milliseconds 400
-$pdesc=$prompt.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
-$gameVerified=$false
-foreach($e in $pdesc){try{if($e.Current.ClassName-eq'TSpinEditX' -and $e.Current.Name-eq'__GAMES__'){$gameVerified=$true}}catch{}}
-if(-not$gameVerified){Shot "$prefix-games-not-configured";throw 'Rollout games control did not update to __GAMES__'}
-"ROLLOUT_GAMES_CONFIGURED: __GAMES__"|Out-File $report -Append
-'@
+  $gameControlLines=@(
+    '$pdesc=$prompt.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)'
+    '$gameSpins=@()'
+    'foreach($e in $pdesc){try{if($e.Current.ClassName-eq''TSpinEditX''){$gameSpins+=,$e}}catch{}}'
+    'if($gameSpins.Count-ne1){Shot "$prefix-games-control-mismatch";throw "Expected one rollout games control, got $($gameSpins.Count)"}'
+    '$gameSpin=$gameSpins[0]'
+    '$gameSet=$false'
+    'try{'
+    '  $valuePattern=[System.Windows.Automation.ValuePattern]$gameSpin.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)'
+    '  $valuePattern.SetValue(''__GAMES__'')'
+    '  $gameSet=$true'
+    '}catch{}'
+    'if(-not$gameSet){'
+    '  $gr=$gameSpin.Current.BoundingRectangle'
+    '  LeftClick ([int]($gr.X+$gr.Width/2)) ([int]($gr.Y+$gr.Height/2))'
+    '  Start-Sleep -Milliseconds 150'
+    '  [System.Windows.Forms.SendKeys]::SendWait(''^a'')'
+    '  Start-Sleep -Milliseconds 100'
+    '  [System.Windows.Forms.SendKeys]::SendWait(''__GAMES__'')'
+    '}'
+    'Start-Sleep -Milliseconds 400'
+    '$pdesc=$prompt.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)'
+    '$gameVerified=$false'
+    'foreach($e in $pdesc){try{if($e.Current.ClassName-eq''TSpinEditX'' -and $e.Current.Name-eq''__GAMES__''){$gameVerified=$true}}catch{}}'
+    'if(-not$gameVerified){Shot "$prefix-games-not-configured";throw ''Rollout games control did not update to __GAMES__''}'
+    '"ROLLOUT_GAMES_CONFIGURED: __GAMES__"|Out-File $report -Append'
+  )
+  $gameControlBlock=($gameControlLines -join "`r`n")+"`r`n"
   $gameControlBlock=$gameControlBlock.Replace('__GAMES__',$gameText)
   if(-not$generated.Contains($gameControlMarker)){throw 'Rollout prompt OK marker not found for adaptive depth'}
   $generated=$generated.Replace($gameControlMarker,$gameControlBlock+$gameControlMarker)
