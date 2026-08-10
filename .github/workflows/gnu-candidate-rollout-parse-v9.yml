@@ -1,0 +1,108 @@
+name: GNU Candidate Rollout Parse v9
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-candidate-rollout-parse-v9.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  parse-candidate-rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU Backgammon CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+      - name: Roll out candidate afterstates separately
+        shell: bash
+        run: |
+          set -euxo pipefail
+          base='4HPwATDgc/ABMA'
+          for rank in 1 2; do
+            cat > "candidate-${rank}.commands" <<EOF
+          set confirm new off
+          set confirm save off
+          set display off
+          set rollout trials 36
+          set rollout quasirandom on
+          set rollout seed 20260812
+          set board $base
+          set dice 3 1
+          hint 5
+          set board =$rank
+          rollout
+          quit
+          EOF
+            timeout 600 gnubg -t -r -c "candidate-${rank}.commands" > "candidate-${rank}.out" 2>&1
+            test -s "candidate-${rank}.out"
+          done
+      - name: Parse rollout evidence
+        shell: python
+        run: |
+          import json, re
+          from pathlib import Path
+
+          def parse(path):
+              text = Path(path).read_text(errors='replace')
+              lines = [x.strip() for x in text.splitlines() if x.strip()]
+              equity_lines = [x for x in lines if re.search(r'(?i)equity|cubeful|cubeless', x)]
+              numbers = []
+              for line in equity_lines:
+                  for m in re.finditer(r'(?<![A-Za-z0-9])([+-]?\d+\.\d+)', line):
+                      try: numbers.append((line, float(m.group(1))))
+                      except ValueError: pass
+              # Prefer explicitly labelled equity values; retain raw evidence for audit.
+              labelled = []
+              for line, value in numbers:
+                  if re.search(r'(?i)equity', line): labelled.append((line, value))
+              chosen = labelled[-1] if labelled else (numbers[-1] if numbers else None)
+              return {
+                  'equity': None if chosen is None else chosen[1],
+                  'sourceLine': None if chosen is None else chosen[0],
+                  'equityLines': equity_lines[-30:],
+              }
+
+          out = {'candidate1': parse('candidate-1.out'), 'candidate2': parse('candidate-2.out')}
+          Path('candidate-rollout-v9.json').write_text(json.dumps(out, indent=2) + '\n')
+          Path('candidate-rollout-v9-evidence.txt').write_text(
+              '\n'.join([
+                  'TEACHER: GNU_BACKGAMMON_TRUE_ROLLOUT_CLI',
+                  'TRIALS_PER_CANDIDATE: 36',
+                  f"CANDIDATE1_PARSED_EQUITY: {out['candidate1']['equity']}",
+                  f"CANDIDATE2_PARSED_EQUITY: {out['candidate2']['equity']}",
+                  'DEV_DATA_USED: False',
+                  'PRISTINE_DATA_USED: False',
+                  'XG_LABELS_USED: False',
+              ]) + '\n'
+          )
+          if out['candidate1']['equity'] is None or out['candidate2']['equity'] is None:
+              raise SystemExit('could not parse rollout equity for both candidates')
+          print(Path('candidate-rollout-v9-evidence.txt').read_text())
+      - name: Publish parse evidence status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          e1=$(grep '^CANDIDATE1_PARSED_EQUITY:' candidate-rollout-v9-evidence.txt | awk '{print $2}')
+          e2=$(grep '^CANDIDATE2_PARSED_EQUITY:' candidate-rollout-v9-evidence.txt | awk '{print $2}')
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-rollout-v9/parsed\",\"description\":\"parsed candidate equities e1=$e1 e2=$e2\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-candidate-rollout-parse-v9
+          path: |
+            candidate-*.commands
+            candidate-*.out
+            candidate-rollout-v9.json
+            candidate-rollout-v9-evidence.txt
+          if-no-files-found: ignore
+          retention-days: 14
