@@ -158,7 +158,7 @@ $menuDump="$env:GITHUB_WORKSPACE\xg-v18-context-menu.txt"
 "POPUP_HWND: $popup"|Out-File $menuDump
 "HMENU: $hmenu"|Out-File $menuDump -Append
 "ITEM_COUNT: $count"|Out-File $menuDump -Append
-$targetId=[uint32]0xFFFFFFFF
+$targetId=[uint32]::MaxValue
 $targetPos=-1
 for($i=0;$i-lt$count;$i++){
   $sb=New-Object System.Text.StringBuilder 512
@@ -170,7 +170,7 @@ for($i=0;$i-lt$count;$i++){
   $norm=($txt -replace '&','').Split("`t")[0].Trim()
   if($norm-eq'XG Roller++'){$targetId=$id;$targetPos=$i}
 }
-if($targetPos-lt0 -or $targetId-eq[uint32]0xFFFFFFFF){throw 'Could not resolve XG Roller++ command id from live context HMENU'}
+if($targetPos-lt0 -or $targetId-eq[uint32]::MaxValue){throw 'Could not resolve XG Roller++ command id from live context HMENU'}
 $targetState=[V18M]::GetMenuState($hmenu,[uint32]$targetPos,0x400)
 if(($targetState-band0x3)-ne0){throw "XG Roller++ menu item disabled state=0x$('{0:X}' -f $targetState)"}
 "XGRPP_COMMAND_ID: $targetId"|Out-File $report15 -Append
