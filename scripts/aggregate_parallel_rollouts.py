@@ -13,7 +13,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("input_dir", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--expected-games", type=int, default=1296)
     args = parser.parse_args()
+    if args.expected_games <= 0:
+        raise SystemExit("expected games must be positive")
 
     files = sorted(args.input_dir.rglob("xg-v16-candidate-*-rollout.json"))
     if len(files) != 5:
@@ -30,14 +33,19 @@ def main():
         rank = int(record["original_rank"])
         if rank in by_original_rank:
             raise SystemExit(f"duplicate original rank {rank}")
-        if int(record["rollout_games"]) != 1296:
-            raise SystemExit(f"rank {rank} is not a 1296-game rollout")
+        games = int(record["rollout_games"])
+        if games != args.expected_games:
+            raise SystemExit(
+                f"rank {rank} rollout games mismatch: got {games}, expected {args.expected_games}"
+            )
         candidate = record["candidate"]
         if candidate.get("analysis_method") != "Rollout":
             raise SystemExit(f"rank {rank} method is not Rollout")
         provenance = candidate.get("provenance", "")
-        if not re.search(r"\b1296\s+Games rolled\b", provenance, re.I):
-            raise SystemExit(f"rank {rank} lacks completed 1296 provenance: {provenance!r}")
+        if not re.search(rf"\b{args.expected_games}\s+Games rolled\b", provenance, re.I):
+            raise SystemExit(
+                f"rank {rank} lacks completed {args.expected_games} provenance: {provenance!r}"
+            )
         move = candidate["move"]
         if move in moves:
             raise SystemExit(f"duplicate move across candidate rollouts: {move}")
@@ -52,7 +60,7 @@ def main():
         record = by_original_rank[rank]
         item = dict(record["candidate"])
         item["original_analysis_rank"] = rank
-        item["rollout_games"] = 1296
+        item["rollout_games"] = args.expected_games
         item["checker_preset"] = record["checker_preset"]
         item["cube_preset"] = record["cube_preset"]
         item["variance_reduction"] = bool(record["variance_reduction"])
@@ -86,7 +94,8 @@ def main():
         "xg_version": first.get("xg_version"),
         "teacher": {
             "candidate_generation": "XG Analyze Position Top-5",
-            "label_method": "Independent 1296-game rollout per candidate",
+            "label_method": f"Independent {args.expected_games}-game rollout per candidate",
+            "rollout_games": args.expected_games,
             "checker_preset": "Moves 3-ply",
             "cube_preset": "XG Roller",
             "variance_reduction": True,
@@ -99,6 +108,7 @@ def main():
     args.output.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(f"xgid={out['xgid']}")
+    print(f"rollout_games={args.expected_games}")
     print(f"best_move={out['best_move']}")
     print(f"best_equity={out['best_equity']:+.6f}")
     for c in rolled:
