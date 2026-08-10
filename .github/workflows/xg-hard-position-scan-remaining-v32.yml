@@ -1,0 +1,168 @@
+name: XG Remaining Non-Pristine Hard Position Scan v32
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-hard-position-scan-remaining-v32.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: xg-v32-hard-position-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan-position:
+    name: scan-${{ matrix.position_id }}
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        include:
+          - position_id: mid11
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:11:6:16:0:19:10
+          - position_id: mid22
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:22:6:16:0:19:10
+          - position_id: mid32
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:32:6:16:0:19:10
+          - position_id: mid33
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:33:6:16:0:19:10
+          - position_id: mid42
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:42:6:16:0:19:10
+          - position_id: mid43
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:43:6:16:0:19:10
+          - position_id: mid44
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:44:6:16:0:19:10
+          - position_id: mid52
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:52:6:16:0:19:10
+          - position_id: mid53
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:53:6:16:0:19:10
+          - position_id: mid54
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:54:6:16:0:19:10
+          - position_id: mid55
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:55:6:16:0:19:10
+          - position_id: mid62
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:62:6:16:0:19:10
+          - position_id: mid63
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:63:6:16:0:19:10
+          - position_id: mid64
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10
+          - position_id: mid65
+            xgid: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:65:6:16:0:19:10
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          POSITION_ID: ${{ matrix.position_id }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
+          Post "xg-v32/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+          Post "xg-v32/$env:POSITION_ID/runner" 'pending' "remaining hard-position scan runner started"
+
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if(Test-Path $log){Copy-Item $log "$env:GITHUB_WORKSPACE\xg-install-v32-${{ matrix.position_id }}.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw 'XG executable missing'}
+          "xgexe=$exe"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Analyze non-pristine dice variant
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          POSITION_ID: ${{ matrix.position_id }}
+          POSITION_XGID: ${{ matrix.xgid }}
+        run: ./scripts/xg-hard-position-scan-v23.ps1
+
+      - name: Upload scan record
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v32-scan-${{ matrix.position_id }}
+          path: |
+            xg-v23-${{ matrix.position_id }}-report.txt
+            xg-v23-${{ matrix.position_id }}-analysis.txt
+            xg-v23-${{ matrix.position_id }}-analysis.json
+            xg-v23-${{ matrix.position_id }}-summary.json
+            xg-v23-${{ matrix.position_id }}-*.png
+            xg-install-v32-${{ matrix.position_id }}.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Publish runner final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          POSITION_ID: ${{ matrix.position_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          $state=if($env:JOB_STATUS-eq'success'){'success'}else{'failure'}
+          $payload=@{state=$state;context="xg-v32/$env:POSITION_ID/job";description="scan $env:POSITION_ID job=$env:JOB_STATUS"}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          $payload=@{state='success';context="xg-v32/$env:POSITION_ID/runner";description='runner reached final status'}|ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+
+  aggregate-hard-scan:
+    name: aggregate-remaining-hard-position-scan
+    needs: scan-position
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download scan records
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xg-v32-scan-*
+          path: artifacts
+          merge-multiple: true
+      - name: Select smallest-gap non-book positions
+        run: |
+          python scripts/aggregate_hard_position_scan.py artifacts xg-v32-hard-position-scan.json --select 5 | tee xg-v32-hard-position-scan.txt
+      - name: Upload hard-position mining audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v32-hard-position-scan-audit
+          path: |
+            xg-v32-hard-position-scan.json
+            xg-v32-hard-position-scan.txt
+          retention-days: 30
+      - name: Publish mining status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          d=json.load(open('xg-v32-hard-position-scan.json'))
+          selected=d['selected_positions']
+          best_gap=selected[0]['top1_gap'] if selected else None
+          desc=f"remaining non-book={d['non_book_position_count']}/{d['position_count']}; selected={len(selected)}; smallest-gap={best_gap}"
+          payload=json.dumps({'state':'success','context':'xg-v32/hard-position-scan','description':desc}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
