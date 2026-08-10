@@ -23,12 +23,7 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          curl -fsS -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$SHA" \
-            -d "{\"state\":\"pending\",\"context\":\"mzand-package/run-$GITHUB_RUN_ID\",\"description\":\"packaging public code + latest successful model\"}" >/dev/null
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$SHA" -d "{\"state\":\"pending\",\"context\":\"mzand-package/run-$GITHUB_RUN_ID\",\"description\":\"packaging code + v3 model + GNU data\"}" >/dev/null
 
       - uses: actions/checkout@v4
 
@@ -38,28 +33,40 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
-          mkdir -p package/code package/model
+          mkdir -p package/code package/model package/data
           rsync -a --exclude '.git' --exclude 'package' ./ package/code/
 
-          gh api \
-            -H 'Accept: application/vnd.github+json' \
-            -H 'X-GitHub-Api-Version: 2022-11-28' \
-            repos/$GITHUB_REPOSITORY/actions/artifacts/9059902740/zip \
-            > /tmp/latest-model.zip
-          unzip -q /tmp/latest-model.zip -d package/model
-          test -s package/model/mzand-gnu-v3-fast.joblib
-          test -s package/model/mzand-gnu-v3-fast-report.txt
+          # Latest successful full v3 model/evidence.
+          gh api -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' repos/$GITHUB_REPOSITORY/actions/artifacts/9059908442/zip > /tmp/v3-model.zip
+          unzip -q /tmp/v3-model.zip -d package/model
+          test -s package/model/mzand-gnu-v3.joblib
+          test -s package/model/gnu-v3-gate-report.txt
+
+          # Full v3 non-pristine GNU teacher corpus: eight independent shards.
+          ids=(9059638209 9059638198 9059633841 9059648661 9059640383 9059647478 9059647517 9059630405)
+          for i in 0 1 2 3 4 5 6 7; do
+            mkdir -p "package/data/shard-$i"
+            gh api -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "repos/$GITHUB_REPOSITORY/actions/artifacts/${ids[$i]}/zip" > "/tmp/shard-$i.zip"
+            unzip -q "/tmp/shard-$i.zip" -d "package/data/shard-$i"
+          done
+          cat package/data/shard-*/gnu-teacher-batch-v3-*.jsonl > package/data/gnu-teacher-batch-v3-combined.jsonl
+          test "$(wc -l < package/data/gnu-teacher-batch-v3-combined.jsonl)" -eq 9099
 
           cat > package/PACKAGE_INFO.txt <<EOF
-          PACKAGE: MZand public code + latest successful model
+          PACKAGE: MZand complete public code + latest successful model + latest full GNU v3 corpus
           SOURCE_REPOSITORY: $GITHUB_REPOSITORY
           SOURCE_COMMIT: $GITHUB_SHA
           SOURCE_BRANCH: $GITHUB_REF_NAME
-          LATEST_SUCCESSFUL_MODEL: mzand-gnu-v3-fast.joblib
-          MODEL_SOURCE_RUN: 31381089641
-          MODEL_SOURCE_ARTIFACT_ID: 9059902740
-          MODEL_SOURCE_COMMIT: 005eb6408a2611eaec817ff287bb8ffab99b8f1b
-          MODEL_DEV_STRICT_TOP1: 0.683915
+          LATEST_SUCCESSFUL_MODEL: mzand-gnu-v3.joblib
+          MODEL_SOURCE_RUN: 31380236754
+          MODEL_SOURCE_ARTIFACT_ID: 9059908442
+          MODEL_SOURCE_COMMIT: a4bd1aa8bfd6294d123c029b488403490c3f933b
+          MODEL_DEV_STRICT_TOP1: 0.709224
+          TRAIN_POSITION_SAMPLES: 5457
+          TUNE_POSITION_SAMPLES: 1819
+          DEV_POSITION_SAMPLES: 1823
+          DATA_TOTAL_POSITIONS: 9099
+          DATA_SHARDS: 8
           MODEL_METRIC_SCOPE: GNU Top-N rerank only; not full legal candidate coverage
           PRISTINE_DATA_USED: False
           XG_LABELS_USED: False
@@ -67,19 +74,19 @@ jobs:
           EOF
 
           cat > package/README_PACKAGE.txt <<'EOF'
-          This archive contains:
-          - code/: complete public repository snapshot at packaging commit
-          - model/: latest successful MZand model artifact and reports
-          - PACKAGE_INFO.txt: exact source/model provenance
+          Contents:
+          - code/: complete public repository snapshot, including .github workflows
+          - model/: latest successful mzand-gnu-v3.joblib and reports
+          - data/: all eight GNU v3 non-pristine development shards plus combined JSONL (9099 positions)
+          - PACKAGE_INFO.txt: exact provenance and measured metrics
 
-          The model is the last successful verified artifact, not an unverified v4 model.
           No private repository content and no pristine-blind data are included.
           EOF
 
       - name: Upload complete package
         uses: actions/upload-artifact@v4
         with:
-          name: mzand-public-code-latest-model
+          name: mzand-complete-code-model-data
           path: package/
           if-no-files-found: error
           include-hidden-files: true
@@ -94,11 +101,5 @@ jobs:
           JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
-          state=failure
-          [ "$JOB_STATUS" = success ] && state=success
-          curl -fsS -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$SHA" \
-            -d "{\"state\":\"$state\",\"context\":\"mzand-package/job\",\"description\":\"package job=$JOB_STATUS\"}" >/dev/null
+          state=failure; [ "$JOB_STATUS" = success ] && state=success
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$SHA" -d "{\"state\":\"$state\",\"context\":\"mzand-package/job\",\"description\":\"package job=$JOB_STATUS\"}" >/dev/null
