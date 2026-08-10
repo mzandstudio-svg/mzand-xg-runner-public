@@ -26,9 +26,12 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, urllib.request
-          payload=json.dumps({'state':'pending','context':'xg-dev/reranker-audit','description':f"workflow run id={os.environ['GITHUB_RUN_ID']}"}).encode()
-          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
-          urllib.request.urlopen(req).read()
+          def post(context, state, description):
+              payload=json.dumps({'state':state,'context':context,'description':description}).encode()
+              req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+              urllib.request.urlopen(req).read()
+          post(f"xg-dev/reranker-run-{os.environ['GITHUB_RUN_ID']}", 'success', f"workflow run id={os.environ['GITHUB_RUN_ID']}")
+          post('xg-dev/reranker-audit', 'pending', 'development-only train/test audit running')
           PY
       - uses: actions/checkout@v4
       - name: Train on non-pristine development and LOPO-test
