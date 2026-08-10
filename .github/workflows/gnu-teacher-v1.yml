@@ -1,0 +1,50 @@
+name: GNU Teacher Smoke v1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - automation/gnu-teacher-v1
+    paths:
+      - 'scripts/gnu-teacher-smoke.mjs'
+      - '.github/workflows/gnu-teacher-v1.yml'
+
+jobs:
+  gnu-teacher-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Prepare isolated GNU teacher package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .gnu-teacher
+          cd .gnu-teacher
+          npm init -y
+          npm install --no-audit --no-fund @nodots/backgammon-ai@1.1.2 @nodots/backgammon-core@1.0.0
+      - name: Run GNU teacher over 21 unique dice rolls
+        shell: bash
+        env:
+          GNU_TEACHER_OUT: gnu-teacher-samples.jsonl
+          GNU_MAX_HINTS: '5'
+        run: |
+          set -euo pipefail
+          NODE_PATH="$PWD/.gnu-teacher/node_modules" node scripts/gnu-teacher-smoke.mjs
+          test -s gnu-teacher-samples.jsonl
+          test -s gnu-teacher-report.txt
+          grep -q 'ROLLS_COMPLETED: 21' gnu-teacher-report.txt
+          grep -q 'PRISTINE_DATA_USED: False' gnu-teacher-report.txt
+          test "$(wc -l < gnu-teacher-samples.jsonl | tr -d ' ')" = '21'
+      - name: Upload GNU teacher evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: gnu-teacher-v1
+          path: |
+            gnu-teacher-samples.jsonl
+            gnu-teacher-report.txt
+          retention-days: 14
