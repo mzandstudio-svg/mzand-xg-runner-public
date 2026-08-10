@@ -1,0 +1,78 @@
+name: XG Development Residual Reranker Audit
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-development-reranker-audit.yml
+      - scripts/train_development_residual_reranker.py
+      - references/xg-v*-coverage.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  train-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publish runner and run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          payload=json.dumps({'state':'pending','context':'xg-dev/reranker-audit','description':f"workflow run id={os.environ['GITHUB_RUN_ID']}"}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
+      - uses: actions/checkout@v4
+      - name: Train on non-pristine development and LOPO-test
+        run: |
+          python scripts/train_development_residual_reranker.py references xg-development-reranker-audit.json | tee xg-development-reranker-audit.txt
+      - name: Verify benchmark guard with synthetic sensitive input
+        run: |
+          mkdir -p synthetic-sensitive
+          cp references/xg-v27-mid31-coverage.json synthetic-sensitive/xg-v27-mid31-coverage.json
+          python - <<'PY'
+          import json
+          p='synthetic-sensitive/xg-v27-mid31-coverage.json'
+          d=json.load(open(p))
+          d['scope']='pristine blind benchmark'
+          json.dump(d, open(p,'w'), indent=2)
+          PY
+          cp references/xg-v31-mid41-coverage.json synthetic-sensitive/xg-v31-mid41-coverage.json
+          cp references/xg-v34-mid65-coverage.json synthetic-sensitive/xg-v34-mid65-coverage.json
+          if python scripts/train_development_residual_reranker.py synthetic-sensitive should-not-exist.json; then
+            echo 'Sensitive benchmark guard unexpectedly accepted synthetic input' >&2
+            exit 1
+          fi
+          test ! -e should-not-exist.json
+          echo 'sensitive_benchmark_guard=PASS'
+      - name: Upload training audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-development-residual-reranker-audit
+          path: |
+            xg-development-reranker-audit.json
+            xg-development-reranker-audit.txt
+          retention-days: 30
+      - name: Publish final audit status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          d=json.load(open('xg-development-reranker-audit.json'))
+          desc=(f"LOPO base={d['baseline']['top1_hits']}/{d['baseline']['position_count']}; "
+                f"rerank={d['reranker']['top1_hits']}/{d['reranker']['position_count']}; adopt={d['adopt_candidate']}")
+          payload=json.dumps({'state':'success','context':'xg-dev/reranker-audit','description':desc}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
