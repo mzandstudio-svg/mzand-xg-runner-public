@@ -1,0 +1,37 @@
+name: PowerShell Runner Syntax Audit
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/powershell-syntax-audit.yml
+      - scripts/*.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parse-powershell-scripts:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse every runner PowerShell script
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $failures=@()
+          Get-ChildItem "$env:GITHUB_WORKSPACE\scripts\*.ps1" | Sort-Object Name | ForEach-Object {
+            $tokens=$null
+            $parseErrors=$null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$parseErrors)
+            if($parseErrors.Count-gt0){
+              foreach($e in $parseErrors){$failures += "$($_.Name): line $($e.Extent.StartLineNumber): $($e.Message)"}
+            }
+          }
+          if($failures.Count-gt0){
+            $failures | ForEach-Object { Write-Error $_ }
+            throw "PowerShell syntax audit failed for $($failures.Count) parse error(s)"
+          }
+          Write-Host "PowerShell syntax audit passed"
