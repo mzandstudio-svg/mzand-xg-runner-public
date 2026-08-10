@@ -1,4 +1,4 @@
-# v19c: rerun with cube-owner-aware XG export parser
+# v19d: deterministic candidate identity for equal-equity Analyze Position rows
 $ErrorActionPreference='Stop'
 $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-parallel-candidate-rollout-v16.ps1'
 $src=Get-Content $srcPath -Raw
@@ -90,6 +90,39 @@ $baseline=ParseExport $baselineText "$prefix-baseline"
 '@
 if(-not$src.Contains($oldAnalysis)){throw 'fixed Analyze Position block not found'}
 $generated=$src.Replace($oldAnalysis,$newAnalysis)
+
+# Equal baseline equities can be returned in a different row order on separate XG
+# processes. Define the five matrix slots deterministically, then map the selected
+# canonical move back to this runner's actual UI row before opening its context menu.
+$targetOld=@'
+$target=$baseline.candidates|Where-Object{$_.rank-eq$rank}|Select-Object -First 1
+if($null-eq$target){throw "Baseline export missing rank $rank"}
+$targetMove=[string]$target.move
+"TARGET_MOVE: $targetMove"|Out-File $report -Append
+"BASELINE_EQUITY: $($target.equity)"|Out-File $report -Append
+Post "$prefix/target" 'success' "rank=$rank move=$targetMove"
+'@
+$targetNew=@'
+$canonicalCandidates=@($baseline.candidates|Sort-Object -Property @{Expression={[double]$_.equity};Descending=$true},@{Expression={[string]$_.move};Ascending=$true})
+if($canonicalCandidates.Count-ne5){throw "Baseline candidate count must be 5, got $($canonicalCandidates.Count)"}
+if(@($canonicalCandidates|ForEach-Object{$_.move}|Select-Object -Unique).Count-ne5){throw 'Baseline contains duplicate moves'}
+$target=$canonicalCandidates[$rank-1]
+if($null-eq$target){throw "Baseline export missing canonical rank $rank"}
+$targetUiRank=[int]$target.rank
+$targetMove=[string]$target.move
+"TARGET_MOVE: $targetMove"|Out-File $report -Append
+"TARGET_CANONICAL_RANK: $rank"|Out-File $report -Append
+"TARGET_UI_RANK: $targetUiRank"|Out-File $report -Append
+"BASELINE_EQUITY: $($target.equity)"|Out-File $report -Append
+Post "$prefix/target" 'success' "canonical rank=$rank ui-rank=$targetUiRank move=$targetMove"
+'@
+if(-not$generated.Contains($targetOld)){throw 'v16 target selection block not found'}
+$generated=$generated.Replace($targetOld,$targetNew)
+
+$rowOld='$rowY=[int]$wr.Top+370+(43*($rank-1))'
+$rowNew='$rowY=[int]$wr.Top+370+(43*($targetUiRank-1))'
+if(-not$generated.Contains($rowOld)){throw 'v16 target row geometry block not found'}
+$generated=$generated.Replace($rowOld,$rowNew)
 
 # Apply the stable rollout submenu/prompt fixes from v16b.
 $start=$generated.IndexOf('$sub=$subs[0]',[System.StringComparison]::Ordinal)
