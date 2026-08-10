@@ -62,8 +62,17 @@ def main():
     rolled.sort(key=lambda x: x["equity"], reverse=True)
     best_equity = rolled[0]["equity"]
     for i, item in enumerate(rolled, start=1):
+        delta = round(item["equity"] - best_equity, 6)
+        # Candidate exports preserve the row rank and equity delta from the
+        # pre-rollout Analyze Position table. Once five independent rollouts
+        # are merged, those fields are stale and can even contain duplicate
+        # ranks. Canonical teacher labels must describe rollout ordering.
+        item["rank"] = i
+        item["source"] = "Rollout"
+        item["analysis_method"] = "Rollout"
+        item["equity_delta"] = delta
         item["rollout_rank"] = i
-        item["equity_delta_from_best"] = round(item["equity"] - best_equity, 6)
+        item["equity_delta_from_best"] = delta
 
     first = records[0]
     out = {
