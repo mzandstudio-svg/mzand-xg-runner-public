@@ -1,0 +1,215 @@
+{
+  "schema": "mzand.xg.teacher-label.v2",
+  "xgid": "XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:11:6:16:0:19:10",
+  "xgid_payload": "-a---BDBBA--dBb--c-dBa----:1:-1:-1:11:6:16:0:19:10",
+  "score": {
+    "x": 16,
+    "o": 6,
+    "match_length": 19
+  },
+  "cube": 2,
+  "on_roll": "X",
+  "dice": [
+    1,
+    1
+  ],
+  "xg_version": "2.10, MET: Kazaross XG2",
+  "teacher": {
+    "candidate_generation": "XG Analyze Position Top-5",
+    "label_method": "Independent 5184-game rollout per candidate",
+    "rollout_games": 5184,
+    "checker_preset": "Moves 3-ply",
+    "cube_preset": "XG Roller",
+    "variance_reduction": true
+  },
+  "candidate_count": 5,
+  "best_move": "11/9(2)",
+  "best_equity": -0.608,
+  "candidates": [
+    {
+      "rank": 1,
+      "source": "Rollout",
+      "move": "11/9(2)",
+      "equity": -0.608,
+      "equity_delta": 0.0,
+      "player": {
+        "win": 0.3297,
+        "gammon": 0.0536,
+        "backgammon": 0.0051
+      },
+      "opponent": {
+        "win": 0.6703,
+        "gammon": 0.2364,
+        "backgammon": 0.0038
+      },
+      "confidence": {
+        "plus_minus_equity": 0.003,
+        "equity_low": -0.612,
+        "equity_high": -0.605,
+        "chance_best": 1.0
+      },
+      "analysis_method": "Rollout",
+      "provenance": "5184 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller",
+      "original_analysis_rank": 1,
+      "rollout_games": 5184,
+      "checker_preset": "Moves 3-ply",
+      "cube_preset": "XG Roller",
+      "variance_reduction": true,
+      "elapsed_seconds": 840,
+      "rollout_rank": 1,
+      "equity_delta_from_best": 0.0
+    },
+    {
+      "rank": 2,
+      "source": "Rollout",
+      "move": "24/22 11/10(2)",
+      "equity": -0.621,
+      "equity_delta": -0.013,
+      "player": {
+        "win": 0.342,
+        "gammon": 0.0542,
+        "backgammon": 0.0074
+      },
+      "opponent": {
+        "win": 0.658,
+        "gammon": 0.2665,
+        "backgammon": 0.0042
+      },
+      "confidence": {
+        "plus_minus_equity": 0.003,
+        "equity_low": -0.625,
+        "equity_high": -0.618,
+        "chance_best": 1.0
+      },
+      "analysis_method": "Rollout",
+      "provenance": "5184 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller",
+      "original_analysis_rank": 2,
+      "rollout_games": 5184,
+      "checker_preset": "Moves 3-ply",
+      "cube_preset": "XG Roller",
+      "variance_reduction": true,
+      "elapsed_seconds": 1110,
+      "rollout_rank": 2,
+      "equity_delta_from_best": -0.013
+    },
+    {
+      "rank": 3,
+      "source": "Rollout",
+      "move": "24/23 11/10(2) 4/3",
+      "equity": -0.654,
+      "equity_delta": -0.046,
+      "player": {
+        "win": 0.3256,
+        "gammon": 0.0552,
+        "backgammon": 0.0068
+      },
+      "opponent": {
+        "win": 0.6744,
+        "gammon": 0.2658,
+        "backgammon": 0.0047
+      },
+      "confidence": {
+        "plus_minus_equity": 0.004,
+        "equity_low": -0.657,
+        "equity_high": -0.65,
+        "chance_best": 1.0
+      },
+      "analysis_method": "Rollout",
+      "provenance": "5184 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller",
+      "original_analysis_rank": 4,
+      "rollout_games": 5184,
+      "checker_preset": "Moves 3-ply",
+      "cube_preset": "XG Roller",
+      "variance_reduction": true,
+      "elapsed_seconds": 1050,
+      "rollout_rank": 3,
+      "equity_delta_from_best": -0.046
+    },
+    {
+      "rank": 4,
+      "source": "Rollout",
+      "move": "24/21 4/3",
+      "equity": -0.664,
+      "equity_delta": -0.056,
+      "player": {
+        "win": 0.3374,
+        "gammon": 0.0543,
+        "backgammon": 0.0062
+      },
+      "opponent": {
+        "win": 0.6626,
+        "gammon": 0.2915,
+        "backgammon": 0.0052
+      },
+      "confidence": {
+        "plus_minus_equity": 0.004,
+        "equity_low": -0.668,
+        "equity_high": -0.661,
+        "chance_best": 1.0
+      },
+      "analysis_method": "Rollout",
+      "provenance": "5184 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller",
+      "original_analysis_rank": 5,
+      "rollout_games": 5184,
+      "checker_preset": "Moves 3-ply",
+      "cube_preset": "XG Roller",
+      "variance_reduction": true,
+      "elapsed_seconds": 1170,
+      "rollout_rank": 4,
+      "equity_delta_from_best": -0.056
+    },
+    {
+      "rank": 5,
+      "source": "Rollout",
+      "move": "11/10(2) 8/6",
+      "equity": -0.665,
+      "equity_delta": -0.057,
+      "player": {
+        "win": 0.3099,
+        "gammon": 0.0524,
+        "backgammon": 0.0059
+      },
+      "opponent": {
+        "win": 0.6901,
+        "gammon": 0.2478,
+        "backgammon": 0.0047
+      },
+      "confidence": {
+        "plus_minus_equity": 0.003,
+        "equity_low": -0.668,
+        "equity_high": -0.661,
+        "chance_best": 1.0
+      },
+      "analysis_method": "Rollout",
+      "provenance": "5184 Games rolled with Variance Reduction. Moves: 3-ply, cube decisions: XG Roller",
+      "original_analysis_rank": 3,
+      "rollout_games": 5184,
+      "checker_preset": "Moves 3-ply",
+      "cube_preset": "XG Roller",
+      "variance_reduction": true,
+      "elapsed_seconds": 1065,
+      "rollout_rank": 5,
+      "equity_delta_from_best": -0.057
+    }
+  ],
+  "adaptive_depth": {
+    "schema": "mzand.xg.rollout-depth-decision.v1",
+    "xgid": "XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:11:6:16:0:19:10",
+    "best_move": "11/9(2)",
+    "second_move": "24/22 11/10(2)",
+    "best_equity": -0.608,
+    "second_equity": -0.621,
+    "gap": 0.013000000000000012,
+    "best_confidence_pm": 0.003,
+    "second_confidence_pm": 0.003,
+    "margin": 0.005,
+    "decision_threshold": 0.011,
+    "current_games": 5184,
+    "accept_current_depth": true,
+    "next_games": 5184,
+    "reason": "decisive_gap"
+  },
+  "source_run_id": 31358039985,
+  "source_commit": "729dab7aeee5c0257d1d9ee7b5ad9f7a4ee242d9",
+  "source_artifact_id": 9051813115
+}
