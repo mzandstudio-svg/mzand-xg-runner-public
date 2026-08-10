@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import re
 from collections import Counter
 from pathlib import Path
 
@@ -45,8 +44,17 @@ def main():
         raise SystemExit(f"duplicate screened moves: {moves}")
 
     candidates.sort(key=lambda candidate: (-float(candidate["equity"]), int(candidate["original_analysis_rank"])))
+    best_equity = float(candidates[0]["equity"])
     for rank, candidate in enumerate(candidates, 1):
+        delta = round(float(candidate["equity"]) - best_equity, 6)
+        # Row-level XGR++ exports may report every isolated candidate as rank 1
+        # with a zero equity delta. Once the five records are merged, expose
+        # the canonical screening order in the generic rank/delta fields too.
+        candidate["rank"] = rank
         candidate["screening_rank"] = rank
+        candidate["equity_delta"] = delta
+        candidate["source"] = candidate["screening_method"]
+        candidate["analysis_method"] = candidate["screening_method"]
 
     result = {
         "schema": "mzand.xg.screening-label.v1",
