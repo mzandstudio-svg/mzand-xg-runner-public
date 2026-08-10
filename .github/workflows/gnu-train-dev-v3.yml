@@ -1,0 +1,139 @@
+name: GNU MZand Train Development v3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/gnu-train-dev-v3.yml
+      - scripts/gnu-teacher-batch-v3.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  GNU_BATCH_GAMES: '96'
+  GNU_TURNS_PER_GAME: '14'
+  GNU_MAX_HINTS: '5'
+  GNU_SEED_BASE: '17001931'
+  GNU_HARD_MARGIN: '0.02'
+
+jobs:
+  label:
+    name: GNU label shard ${{ matrix.shard }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5,6,7]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install GNU native prerequisites
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libglib2.0-dev
+          npm init -y
+          npm install --no-audit --no-fund @nodots/backgammon-ai@1.1.2 @nodots/backgammon-core@1.0.0
+      - name: Generate GNU shard
+        shell: bash
+        env:
+          GNU_SHARD_INDEX: ${{ matrix.shard }}
+          GNU_GAME_OFFSET: ${{ matrix.shard * 96 }}
+        run: node scripts/gnu-teacher-batch-v3.mjs
+      - name: Upload shard
+        uses: actions/upload-artifact@v7
+        with:
+          name: gnu-v3-shard-${{ matrix.shard }}
+          path: |
+            gnu-teacher-batch-v3-${{ matrix.shard }}.jsonl
+            gnu-teacher-batch-v3-${{ matrix.shard }}-report.txt
+          retention-days: 14
+
+  train:
+    name: Freeze and evaluate MZand v3 candidate
+    needs: label
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Publish GNU v3 run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          post() { curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"$2\",\"context\":\"$1\",\"description\":\"$3\"}" >/dev/null; }
+          post "gnu-train-v3/run-$GITHUB_RUN_ID" success "workflow run id=$GITHUB_RUN_ID"
+          post "gnu-train-v3/job" pending "eight-shard GNU candidate training"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gnu-v3-shard-*
+          path: shards
+          merge-multiple: true
+      - name: Combine strictly non-pristine development corpus
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat shards/gnu-teacher-batch-v3-*.jsonl > gnu-teacher-batch-v3.jsonl
+          cat shards/gnu-teacher-batch-v3-*-report.txt > gnu-teacher-batch-v3-reports.txt
+          test "$(ls shards/gnu-teacher-batch-v3-*.jsonl | wc -l)" -eq 8
+          grep -q 'PRISTINE_DATA_USED: False' gnu-teacher-batch-v3-reports.txt
+          echo "TOTAL_POSITIONS: $(wc -l < gnu-teacher-batch-v3.jsonl)" | tee gnu-v3-combined-report.txt
+          echo "PRISTINE_DATA_USED: False" >> gnu-v3-combined-report.txt
+      - name: Install ML stack
+        shell: bash
+        run: python -m pip install --disable-pip-version-check -q numpy scikit-learn joblib xgboost
+      - name: Select on tune, freeze, then evaluate held-out dev
+        shell: bash
+        env:
+          GNU_BATCH_OUT: gnu-teacher-batch-v3.jsonl
+          MZAND_MODEL_OUT: mzand-gnu-v3.joblib
+        run: python scripts/train-mzand-gnu-v2.py
+      - name: Publish measured held-out metric
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          metric=$(grep '^DEV_STRICT_TOP1:' mzand-gnu-v2-report.txt | awk '{print $2}')
+          n=$(grep '^DEV_POSITION_SAMPLES:' mzand-gnu-v2-report.txt | awk '{print $2}')
+          scope=$(grep '^METRIC_SCOPE:' mzand-gnu-v2-report.txt | cut -d: -f2- | xargs)
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-train-v3/evidence\",\"description\":\"held-out Top5-rerank Top-1=$metric n=$n\"}" >/dev/null
+          printf 'DEV_STRICT_TOP1: %s\nDEV_N: %s\nMETRIC_SCOPE: %s\n' "$metric" "$n" "$scope" > gnu-v3-gate-report.txt
+      - name: Upload v3 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gnu-mzand-train-dev-v3
+          path: |
+            gnu-v3-combined-report.txt
+            gnu-v3-gate-report.txt
+            gnu-teacher-batch-v3-reports.txt
+            mzand-gnu-v3.joblib
+            mzand-gnu-v2-report.json
+            mzand-gnu-v2-report.txt
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Publish final status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          state=failure; [ "$JOB_STATUS" = success ] && state=success
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"$state\",\"context\":\"gnu-train-v3/job\",\"description\":\"job=$JOB_STATUS\"}" >/dev/null
