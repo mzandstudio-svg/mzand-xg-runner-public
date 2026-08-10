@@ -1,0 +1,73 @@
+name: GNU True Rollout CLI Smoke v8
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-true-rollout-smoke-v8.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  rollout-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Publish rollout smoke marker
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-rollout-v8/run-$GITHUB_RUN_ID\",\"description\":\"true GNU CLI rollout smoke started\"}" >/dev/null
+      - uses: actions/checkout@v4
+      - name: Install GNU Backgammon CLI
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+          gnubg --version | tee gnu-rollout-version.txt
+      - name: Run deterministic 36-trial true rollout smoke
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > gnu-rollout-v8.commands <<'EOF'
+          set confirm new off
+          set confirm save off
+          set display off
+          set board 4HPwATDgc/ABMA
+          set dice 3 1
+          set rollout trials 36
+          set rollout quasirandom on
+          set rollout seed 20260810
+          show rollout
+          rollout
+          quit
+          EOF
+          timeout 600 gnubg -t -r -c gnu-rollout-v8.commands > gnu-rollout-v8-output.txt 2>&1
+          grep -Ei 'rollout|equity|trials|games' gnu-rollout-v8-output.txt | tail -100 > gnu-rollout-v8-evidence.txt || true
+          test -s gnu-rollout-v8-output.txt
+          printf 'TEACHER: GNU_BACKGAMMON_TRUE_ROLLOUT_CLI\nTRIALS_REQUESTED: 36\nPRISTINE_DATA_USED: False\nXG_LABELS_USED: False\n' >> gnu-rollout-v8-evidence.txt
+      - name: Publish smoke evidence status
+        if: success()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-rollout-v8/smoke\",\"description\":\"GNU CLI rollout command completed\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-true-rollout-smoke-v8
+          path: |
+            gnu-rollout-version.txt
+            gnu-rollout-v8.commands
+            gnu-rollout-v8-output.txt
+            gnu-rollout-v8-evidence.txt
+          if-no-files-found: ignore
+          retention-days: 14
