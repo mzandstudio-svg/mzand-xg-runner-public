@@ -1,4 +1,4 @@
-name: GNU Teacher Development v1
+name: GNU Teacher Development v2
 
 on:
   push:
@@ -10,22 +10,44 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 jobs:
   gnu-teacher-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Publish runner start
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d '{"state":"pending","context":"gnu-teacher-v2/job","description":"GNU teacher smoke started"}' >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install GNU teacher bridge
+      - name: Resolve published GNU teacher packages
         shell: bash
         run: |
           set -euxo pipefail
           npm init -y
-          npm install --no-audit --no-fund @nodots/backgammon-ai@1.1.2 @nodots/backgammon-core@1.0.0
+          npm view @nodots/backgammon-ai@1.0.4 version
+          npm view @nodots/backgammon-core@1.0.2 version
+          npm install --no-audit --no-fund @nodots/backgammon-ai@1.0.4 @nodots/backgammon-core@1.0.2
+          node --input-type=module - <<'NODE'
+          import { gnubgHints } from '@nodots/backgammon-ai';
+          if (!gnubgHints || typeof gnubgHints.getHintsFromPositionId !== 'function') {
+            throw new Error('Published @nodots/backgammon-ai does not expose gnubgHints.getHintsFromPositionId');
+          }
+          console.log('GNU_POSITION_ID_API: True');
+          NODE
       - name: Generate GNU development labels
         shell: bash
         env:
@@ -40,10 +62,28 @@ jobs:
           grep -q 'ROLLS_COMPLETED: 21' gnu-teacher-report.txt
           grep -q 'PRISTINE_DATA_USED: False' gnu-teacher-report.txt
       - name: Upload GNU teacher evidence
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: gnu-teacher-dev-v1
+          name: gnu-teacher-dev-v2
           path: |
             gnu-teacher-samples.jsonl
             gnu-teacher-report.txt
+          if-no-files-found: ignore
           retention-days: 14
+      - name: Publish final status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [ "$JOB_STATUS" = success ]; then state=success; else state=failure; fi
+          printf -v body '{"state":"%s","context":"gnu-teacher-v2/job","description":"GNU teacher smoke %s"}' "$state" "$JOB_STATUS"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "$body" >/dev/null
