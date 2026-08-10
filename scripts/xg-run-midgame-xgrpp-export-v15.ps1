@@ -6,6 +6,8 @@ if($idx-lt0){throw 'v8 cleanup marker missing'}
 $prefix=$src.Substring(0,$idx)
 $tail=@'
 
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -50,22 +52,48 @@ function InvokeAnalyzePosition(){
   if(-not[V8N]::GetMenuItemRect($hwnd,$sub,1,[ref]$pos)){throw 'Analyze Position row rect failed after midgame switch'}
   ClickXY ([int](($pos.Left+$pos.Right)/2)) ([int](($pos.Top+$pos.Bottom)/2))
 }
+function FindSaveGameAutomationDialog(){
+  try{
+    $root=[System.Windows.Automation.AutomationElement]::RootElement
+    $nameCond=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'Save Game')
+    return $root.FindFirst([System.Windows.Automation.TreeScope]::Children,$nameCond)
+  }catch{return $null}
+}
+function InvokeAutomationNo([System.Windows.Automation.AutomationElement]$dialog){
+  if($null-eq$dialog){return $false}
+  try{
+    $nameCond=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'No')
+    $button=$dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$nameCond)
+    if($null-eq$button){return $false}
+    $pattern=$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+    if($null-eq$pattern){return $false}
+    $pattern.Invoke()
+    return $true
+  }catch{return $false}
+}
 function DismissDelayedSaveGame(){
-  $deadline=(Get-Date).AddSeconds(30)
+  $deadline=(Get-Date).AddSeconds(35)
   while((Get-Date)-lt$deadline){
     $dialog=[V15N]::FindWindow($null,'Save Game')
     if($dialog-ne[IntPtr]::Zero){
       $noButton=[V15N]::FindWindowEx($dialog,[IntPtr]::Zero,'Button','No')
       if($noButton-ne[IntPtr]::Zero){
         [V15N]::SendMessage($noButton,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
-        Start-Sleep 2
-        if([V15N]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero){return $true}
+        Start-Sleep 1
+        if([V15N]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero -and $null-eq(FindSaveGameAutomationDialog)){return $true}
       }
       [V15N]::SetForegroundWindow($dialog)|Out-Null
       Start-Sleep -Milliseconds 250
       [System.Windows.Forms.SendKeys]::SendWait('%n')
-      Start-Sleep 2
-      if([V15N]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero){return $true}
+      Start-Sleep 1
+      if([V15N]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero -and $null-eq(FindSaveGameAutomationDialog)){return $true}
+    }
+    $autoDialog=FindSaveGameAutomationDialog
+    if($null-ne$autoDialog){
+      if(InvokeAutomationNo $autoDialog){
+        Start-Sleep 1
+        if([V15N]::FindWindow($null,'Save Game')-eq[IntPtr]::Zero -and $null-eq(FindSaveGameAutomationDialog)){return $true}
+      }
     }
     Start-Sleep -Milliseconds 500
   }
