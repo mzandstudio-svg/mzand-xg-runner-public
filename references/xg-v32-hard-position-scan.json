@@ -1,0 +1,37 @@
+{
+  "schema": "mzand.xg.hard-position-scan-corpus.v1",
+  "scope": "non-pristine development dice variants only; not a blind benchmark",
+  "position_count": 15,
+  "non_book_position_count": 15,
+  "book_hit_count": 0,
+  "selection_rule": "smallest baseline Top-1 equity gap among non-book positions",
+  "selected_count": 5,
+  "selected_positions": [
+    {"position_id":"mid65","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:65:6:16:0:19:10","top1_gap":0.0,"best_move":"13/2","second_move":"13/8 13/7","candidate_count":5},
+    {"position_id":"mid11","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:11:6:16:0:19:10","top1_gap":0.012,"best_move":"11/9(2)","second_move":"24/22 11/10(2)","candidate_count":5},
+    {"position_id":"mid44","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:44:6:16:0:19:10","top1_gap":0.012,"best_move":"13/9(2) 11/7(2)","second_move":"13/9(2) 8/4 6/2","candidate_count":5},
+    {"position_id":"mid22","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:22:6:16:0:19:10","top1_gap":0.013,"best_move":"24/22 13/11(2) 6/4","second_move":"24/22 11/9(2) 6/4","candidate_count":5},
+    {"position_id":"mid42","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:42:6:16:0:19:10","top1_gap":0.013,"best_move":"13/9 6/4","second_move":"13/11 8/4","candidate_count":5}
+  ],
+  "ranked_non_book_positions": [
+    {"rank":1,"position_id":"mid65","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:65:6:16:0:19:10","top1_gap":0.0,"best_move":"13/2","second_move":"13/8 13/7","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":2,"position_id":"mid11","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:11:6:16:0:19:10","top1_gap":0.012,"best_move":"11/9(2)","second_move":"24/22 11/10(2)","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":3,"position_id":"mid44","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:44:6:16:0:19:10","top1_gap":0.012,"best_move":"13/9(2) 11/7(2)","second_move":"13/9(2) 8/4 6/2","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":4,"position_id":"mid22","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:22:6:16:0:19:10","top1_gap":0.013,"best_move":"24/22 13/11(2) 6/4","second_move":"24/22 11/9(2) 6/4","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":5,"position_id":"mid42","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:42:6:16:0:19:10","top1_gap":0.013,"best_move":"13/9 6/4","second_move":"13/11 8/4","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":6,"position_id":"mid33","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:33:6:16:0:19:10","top1_gap":0.02,"best_move":"24/21 13/4","second_move":"13/10(2) 6/3(2)","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":7,"position_id":"mid52","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:52:6:16:0:19:10","top1_gap":0.033,"best_move":"13/8 6/4","second_move":"8/3 6/4","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":8,"position_id":"mid43","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:43:6:16:0:19:10","top1_gap":0.06,"best_move":"24/21 8/4","second_move":"8/4 6/3","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":9,"position_id":"mid64","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10","top1_gap":0.069,"best_move":"13/7 8/4","second_move":"8/2 6/2","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":10,"position_id":"mid55","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:55:6:16:0:19:10","top1_gap":0.074,"best_move":"13/3(2)","second_move":"11/1(2)","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":11,"position_id":"mid32","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:32:6:16:0:19:10","top1_gap":0.081,"best_move":"24/21 6/4","second_move":"6/4 6/3","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":12,"position_id":"mid54","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:54:6:16:0:19:10","top1_gap":0.108,"best_move":"13/4","second_move":"8/4 6/1","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":13,"position_id":"mid63","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:63:6:16:0:19:10","top1_gap":0.211,"best_move":"24/15","second_move":"13/4","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":14,"position_id":"mid62","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:62:6:16:0:19:10","top1_gap":0.377,"best_move":"24/16*","second_move":"13/7 6/4","candidate_count":5,"analysis_elapsed_seconds":4},
+    {"rank":15,"position_id":"mid53","xgid":"XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:53:6:16:0:19:10","top1_gap":0.404,"best_move":"24/16*","second_move":"8/3 6/3","candidate_count":5,"analysis_elapsed_seconds":4}
+  ],
+  "book_hits": [],
+  "source_run_id": 31355864170,
+  "source_commit": "ce4293796259ccb2c9d32a7e8a6ce8649ed43f37",
+  "source_artifact_id": 9050721798
+}
