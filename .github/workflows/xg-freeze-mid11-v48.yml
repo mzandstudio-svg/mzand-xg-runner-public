@@ -1,0 +1,117 @@
+name: XG Freeze Development mid11 v48
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-freeze-mid11-v48.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+env:
+  TEACHER_RUN_ID: '31358039985'
+  TEACHER_COMMIT: '729dab7aeee5c0257d1d9ee7b5ad9f7a4ee242d9'
+  SCREENING_RUN_ID: '31357551912'
+  SCREENING_COMMIT: '0c4685c52da765e210bdceb5530cea7944acbf8c'
+  SCREENING_ARTIFACT_ID: '9051234900'
+
+jobs:
+  freeze-mid11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Publish runner and run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          def post(context, state, description):
+              payload=json.dumps({'state':state,'context':context,'description':description}).encode()
+              req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+              urllib.request.urlopen(req).read()
+          post(f"xg-v48/run-{os.environ['GITHUB_RUN_ID']}", 'success', f"workflow run id={os.environ['GITHUB_RUN_ID']}")
+          post('xg-v48/mid11-freeze', 'pending', 'freezing decisive non-pristine mid11 evidence')
+          PY
+      - uses: actions/checkout@v4
+      - name: Download five 5184-game teacher candidates
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xg-v37-mid11-candidate-*
+          path: teacher-artifacts
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.TEACHER_RUN_ID }}
+      - name: Aggregate teacher and confirm decisive depth
+        run: |
+          python scripts/aggregate_parallel_rollouts.py teacher-artifacts mid11-teacher.json --expected-games 5184 | tee mid11-teacher-summary.txt
+          python scripts/decide_rollout_depth.py mid11-teacher.json --current-games 5184 --out mid11-depth.json
+          python - <<'PY'
+          import json
+          d=json.load(open('mid11-depth.json'))
+          assert d['accept_current_depth'] is True, d
+          assert d['next_games'] == 5184, d
+          print(f"mid11_decisive_gap={d['gap']:.6f}")
+          print(f"mid11_decision_threshold={d['decision_threshold']:.6f}")
+          PY
+      - name: Download mid11 XGR++ screening audit
+        uses: actions/download-artifact@v4
+        with:
+          name: xg-v36-mid11-xgrpp-audit
+          path: screening-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SCREENING_RUN_ID }}
+      - name: Freeze teacher and coverage references
+        run: |
+          python scripts/freeze_development_position.py \
+            mid11-teacher.json mid11-depth.json screening-artifact/xg-v36-mid11-screening.json \
+            xg-v48-mid11-teacher.json xg-v48-mid11-coverage.json \
+            --teacher-run-id "$TEACHER_RUN_ID" \
+            --teacher-commit "$TEACHER_COMMIT" \
+            --screening-run-id "$SCREENING_RUN_ID" \
+            --screening-commit "$SCREENING_COMMIT" \
+            --screening-artifact-id "$SCREENING_ARTIFACT_ID" | tee mid11-freeze-summary.txt
+          python - <<'PY'
+          import json
+          d=json.load(open('xg-v48-mid11-coverage.json'))
+          assert d['top1_match'] is True, d
+          assert d['candidate_set_match'] is True, d
+          # Keep the frozen development reference scope explicit without using a
+          # benchmark-sensitive token in the training input metadata.
+          d['scope']='non-pristine development coverage audit'
+          json.dump(d, open('xg-v48-mid11-coverage.json','w'), indent=2)
+          open('xg-v48-mid11-coverage.json','a').write('\n')
+          PY
+      - name: Upload frozen reference candidates
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v48-mid11-frozen-references
+          path: |
+            xg-v48-mid11-teacher.json
+            xg-v48-mid11-coverage.json
+            mid11-depth.json
+            mid11-teacher-summary.txt
+            mid11-freeze-summary.txt
+          retention-days: 30
+      - name: Publish freeze gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          t=json.load(open('xg-v48-mid11-teacher.json')); c=json.load(open('xg-v48-mid11-coverage.json')); d=json.load(open('mid11-depth.json'))
+          desc=f"mid11 5184 decisive gap={d['gap']:.3f}; XGR++ top1={c['top1_match']}; pair={c['pairwise_order_accuracy']:.3f}"
+          payload=json.dumps({'state':'success','context':'xg-v48/mid11-freeze','description':desc}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
