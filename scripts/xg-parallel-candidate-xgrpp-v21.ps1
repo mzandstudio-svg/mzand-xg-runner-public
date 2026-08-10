@@ -102,6 +102,46 @@ $baseline|ConvertTo-Json -Depth 12|Set-Content (Join-Path $env:GITHUB_WORKSPACE 
 if(-not$src.Contains($old)){throw 'v18 fixed Analyze Position block not found'}
 $generated=$src.Replace($old,$new)
 
+# XG can flip equal-equity rows between independent runners. Matrix rank therefore
+# cannot identify a move reliably when the baseline contains a tie. Canonicalize the
+# five candidates by equity descending and move text ascending, then click the row
+# where that canonical move appears in this runner's actual UI ordering.
+$targetOld=@'
+$target=$baseline.candidates|Where-Object{$_.rank-eq$rank}|Select-Object -First 1
+if($null-eq$target){throw "baseline missing rank $rank"}
+$targetMove=[string]$target.move
+$baselineMethod=[string]$target.analysis_method
+"TARGET_MOVE: $targetMove"|Out-File $report -Append
+"BASELINE_SOURCE: $($target.source)"|Out-File $report -Append
+"BASELINE_METHOD: $baselineMethod"|Out-File $report -Append
+"BASELINE_EQUITY: $($target.equity)"|Out-File $report -Append
+Post "$prefix/target" 'success' "candidate rank $rank identified"
+'@
+$targetNew=@'
+$canonicalCandidates=@($baseline.candidates|Sort-Object -Property @{Expression={[double]$_.equity};Descending=$true},@{Expression={[string]$_.move};Ascending=$true})
+if($canonicalCandidates.Count-ne5){throw "baseline candidate count must be 5, got $($canonicalCandidates.Count)"}
+if(@($canonicalCandidates|ForEach-Object{$_.move}|Select-Object -Unique).Count-ne5){throw 'baseline contains duplicate moves'}
+$target=$canonicalCandidates[$rank-1]
+if($null-eq$target){throw "baseline missing canonical rank $rank"}
+$targetUiRank=[int]$target.rank
+$targetMove=[string]$target.move
+$baselineMethod=[string]$target.analysis_method
+"TARGET_MOVE: $targetMove"|Out-File $report -Append
+"TARGET_CANONICAL_RANK: $rank"|Out-File $report -Append
+"TARGET_UI_RANK: $targetUiRank"|Out-File $report -Append
+"BASELINE_SOURCE: $($target.source)"|Out-File $report -Append
+"BASELINE_METHOD: $baselineMethod"|Out-File $report -Append
+"BASELINE_EQUITY: $($target.equity)"|Out-File $report -Append
+Post "$prefix/target" 'success' "canonical rank $rank mapped to UI rank $targetUiRank"
+'@
+if(-not$generated.Contains($targetOld)){throw 'v18 target selection block not found'}
+$generated=$generated.Replace($targetOld,$targetNew)
+
+$rowOld='$rowX=[int]$wr.Left+130;$rowY=[int]$wr.Top+370+(43*($rank-1))'
+$rowNew='$rowX=[int]$wr.Left+130;$rowY=[int]$wr.Top+370+(43*($targetUiRank-1))'
+if(-not$generated.Contains($rowOld)){throw 'v18 target row geometry block not found'}
+$generated=$generated.Replace($rowOld,$rowNew)
+
 $pollOld=@'
   try{
     $text=ExportText $xg
@@ -115,9 +155,9 @@ $pollOld=@'
 $pollNew=@'
   try{
     # XG omits the currently selected move from Ctrl+C while a row-level
-    # analysis result is active. Select a different row before exporting so
-    # the target XGR++ row remains present in the partial clipboard payload.
-    $probeRank=if($rank-ne5){5}else{4}
+    # analysis result is active. Cycle the selected row between polls so even
+    # if XGR++ reorders the target, a later export necessarily selects another row.
+    $probeRank=1+(($rank+[int]($elapsed/10))%5)
     $probeY=[int]$wr.Top+370+(43*($probeRank-1))
     LeftClick $rowX $probeY
     Start-Sleep -Milliseconds 250
