@@ -17,6 +17,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Publish run marker
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-rollout-v9/run-$GITHUB_RUN_ID\",\"description\":\"candidate rollout equity parse started\"}" >/dev/null
       - name: Install GNU Backgammon CLI
         run: |
           sudo apt-get update
@@ -59,7 +66,6 @@ jobs:
                   for m in re.finditer(r'(?<![A-Za-z0-9])([+-]?\d+\.\d+)', line):
                       try: numbers.append((line, float(m.group(1))))
                       except ValueError: pass
-              # Prefer explicitly labelled equity values; retain raw evidence for audit.
               labelled = []
               for line, value in numbers:
                   if re.search(r'(?i)equity', line): labelled.append((line, value))
