@@ -20,7 +20,7 @@ function encodeBoard(game){const color=game.activePlayer.color,opponent=color===
 function players(){return[Player.initialize('white','clockwise','rolling-for-start',true),Player.initialize('black','counterclockwise','rolling-for-start',true)];}
 
 await initializeGnubgHints({config:DEFAULT_HINTS_CONFIG}); await configureGnubgHints(DEFAULT_HINTS_CONFIG);
-const rows=[]; let failures=0,naturalEnds=0,baseStates=0;
+const rows=[]; let failures=0,naturalEnds=0,baseStates=0,nonRankable=0;
 try{
  for(let lg=0;lg<games;lg++){
   const gameIndex=offset+lg, seed=seedBase+gameIndex*1009; seedRandom(seed);
@@ -32,9 +32,14 @@ try{
     const {request}=buildHintContextFromGame(rolled);
     for(const dice of diceSet){
       request.dice=[dice[0],dice[1]];
-      const hints=await getMoveHints(request,maxHints); if(!Array.isArray(hints)||!hints.length) throw new Error(`NO_HINTS dice=${dice.join('')}`);
+      const hints=await getMoveHints(request,maxHints);
+      if(!Array.isArray(hints)||!hints.length){
+        nonRankable++;
+        rows.push({teacher:'GNU Backgammon board-based all-dice',pristine:false,shard,seed,gameIndex,turn,split,positionId,dice,board,maxHints,teacherMargin:null,hard:false,rankable:false,forcedOrPass:true,hints:[]});
+        continue;
+      }
       const margin=hints.length>1?Number((hints[0].equity??0)-(hints[1].equity??0)):null;
-      rows.push({teacher:'GNU Backgammon board-based all-dice',pristine:false,shard,seed,gameIndex,turn,split,positionId,dice,board,maxHints,teacherMargin:margin,hard:margin!==null&&margin<hardMargin,hints});
+      rows.push({teacher:'GNU Backgammon board-based all-dice',pristine:false,shard,seed,gameIndex,turn,split,positionId,dice,board,maxHints,teacherMargin:margin,hard:margin!==null&&margin<hardMargin,rankable:hints.length>1,forcedOrPass:hints.length===1,hints});
     }
     state=await executeRobotTurnWithGNU(rolled,null);
    }catch(err){const msg=String(err?.stack||err);if(/finished|game over|winner|won the game/i.test(msg))naturalEnds++;else{failures++;console.error(`game=${gameIndex} turn=${turn}`,msg);}break;}
@@ -42,7 +47,7 @@ try{
  }
 }finally{await shutdownGnubgHints();}
 fs.writeFileSync(out,rows.map(r=>JSON.stringify(r)).join('\n')+'\n');
-const c=s=>rows.filter(r=>r.split===s).length,h=s=>rows.filter(r=>r.split===s&&r.hard).length;
-fs.writeFileSync(report,[`SHARD: ${shard}`,`BASE_STATES: ${baseStates}`,`DICE_PER_BASE_STATE: 21`,`SAMPLES_COMPLETED: ${rows.length}`,`TRAIN_SAMPLES: ${c('train')}`,`TUNE_SAMPLES: ${c('tune')}`,`DEV_SAMPLES: ${c('dev')}`,`TRAIN_HARD: ${h('train')}`,`TUNE_HARD: ${h('tune')}`,`DEV_HARD: ${h('dev')}`,`NATURAL_ENDS: ${naturalEnds}`,`ENGINE_FAILURES: ${failures}`,'BOARD_BASED_HINTS: True','DICE_AUGMENTATION: ALL_21','SPLIT_UNIT: WHOLE_GAME','PRISTINE_DATA_USED: False'].join('\n')+'\n');
-if(rows.length<baseStates*20) throw new Error(`incomplete all-dice rows ${rows.length}/${baseStates*21}`); if(failures>2) throw new Error(`too many failures ${failures}`);
-console.log(`v4 shard ${shard}: ${baseStates} boards -> ${rows.length} GNU labels`);
+const c=s=>rows.filter(r=>r.split===s).length,h=s=>rows.filter(r=>r.split===s&&r.hard).length,rk=s=>rows.filter(r=>r.split===s&&r.rankable).length;
+fs.writeFileSync(report,[`SHARD: ${shard}`,`BASE_STATES: ${baseStates}`,`DICE_PER_BASE_STATE: 21`,`SAMPLES_COMPLETED: ${rows.length}`,`TRAIN_SAMPLES: ${c('train')}`,`TUNE_SAMPLES: ${c('tune')}`,`DEV_SAMPLES: ${c('dev')}`,`TRAIN_RANKABLE: ${rk('train')}`,`TUNE_RANKABLE: ${rk('tune')}`,`DEV_RANKABLE: ${rk('dev')}`,`TRAIN_HARD: ${h('train')}`,`TUNE_HARD: ${h('tune')}`,`DEV_HARD: ${h('dev')}`,`NON_RANKABLE_FORCED_OR_PASS: ${nonRankable}`,`NATURAL_ENDS: ${naturalEnds}`,`ENGINE_FAILURES: ${failures}`,'BOARD_BASED_HINTS: True','DICE_AUGMENTATION: ALL_21','NON_RANKABLE_DICE_RECORDED_NOT_DROPPED: True','SPLIT_UNIT: WHOLE_GAME','PRISTINE_DATA_USED: False'].join('\n')+'\n');
+if(rows.length!==baseStates*21) throw new Error(`incomplete all-dice rows ${rows.length}/${baseStates*21}`); if(failures>2) throw new Error(`too many failures ${failures}`);
+console.log(`v4 shard ${shard}: ${baseStates} boards -> ${rows.length} GNU labels (${nonRankable} non-rankable forced/pass)`);
