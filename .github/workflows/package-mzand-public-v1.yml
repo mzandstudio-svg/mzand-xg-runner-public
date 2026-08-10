@@ -1,0 +1,103 @@
+name: Package MZand Public Snapshot v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/package-mzand-public-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish package run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -d "{\"state\":\"pending\",\"context\":\"mzand-package/run-$GITHUB_RUN_ID\",\"description\":\"packaging public code + latest successful model\"}" >/dev/null
+
+      - uses: actions/checkout@v4
+
+      - name: Build complete package tree
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          mkdir -p package/code package/model
+          rsync -a --exclude '.git' --exclude 'package' ./ package/code/
+
+          gh api \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            repos/$GITHUB_REPOSITORY/actions/artifacts/9059902740/zip \
+            > /tmp/latest-model.zip
+          unzip -q /tmp/latest-model.zip -d package/model
+          test -s package/model/mzand-gnu-v3-fast.joblib
+          test -s package/model/mzand-gnu-v3-fast-report.txt
+
+          cat > package/PACKAGE_INFO.txt <<EOF
+          PACKAGE: MZand public code + latest successful model
+          SOURCE_REPOSITORY: $GITHUB_REPOSITORY
+          SOURCE_COMMIT: $GITHUB_SHA
+          SOURCE_BRANCH: $GITHUB_REF_NAME
+          LATEST_SUCCESSFUL_MODEL: mzand-gnu-v3-fast.joblib
+          MODEL_SOURCE_RUN: 31381089641
+          MODEL_SOURCE_ARTIFACT_ID: 9059902740
+          MODEL_SOURCE_COMMIT: 005eb6408a2611eaec817ff287bb8ffab99b8f1b
+          MODEL_DEV_STRICT_TOP1: 0.683915
+          MODEL_METRIC_SCOPE: GNU Top-N rerank only; not full legal candidate coverage
+          PRISTINE_DATA_USED: False
+          XG_LABELS_USED: False
+          NOTE: v4 source is included, but v4 has not produced a newer successful model artifact yet.
+          EOF
+
+          cat > package/README_PACKAGE.txt <<'EOF'
+          This archive contains:
+          - code/: complete public repository snapshot at packaging commit
+          - model/: latest successful MZand model artifact and reports
+          - PACKAGE_INFO.txt: exact source/model provenance
+
+          The model is the last successful verified artifact, not an unverified v4 model.
+          No private repository content and no pristine-blind data are included.
+          EOF
+
+      - name: Upload complete package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mzand-public-code-latest-model
+          path: package/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish final package status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          state=failure
+          [ "$JOB_STATUS" = success ] && state=success
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -d "{\"state\":\"$state\",\"context\":\"mzand-package/job\",\"description\":\"package job=$JOB_STATUS\"}" >/dev/null
