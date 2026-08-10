@@ -1,0 +1,142 @@
+name: XG Hard Position XGR++ mid42 Recovery v47
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-hard-xgrpp-mid42-recover-v47.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+concurrency:
+  group: xg-v47-mid42-xgrpp-recovery-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  POSITION_ID: mid42
+  POSITION_XGID: XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:42:6:16:0:19:10
+  BASE_SCREENING_RUN_ID: '31358478796'
+
+jobs:
+  recover-candidate-5:
+    name: mid42-xgrpp-recover-5
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Publish runner and run id
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
+          Post "xg-v47/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+          Post 'xg-v47/candidate-5/runner' 'pending' 'mid42 XGR++ recovery candidate 5 runner started'
+      - uses: actions/checkout@v4
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if(Test-Path $log){Copy-Item $log "$env:GITHUB_WORKSPACE\xg-install-v47-c5.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw 'XG executable missing'}
+          "xgexe=$exe"|Out-File $env:GITHUB_ENV -Append
+      - name: Reach proven startup XGID
+        shell: powershell
+        run: ./scripts/xg-reach-xgid-retry.ps1
+      - name: Switch to mined hard position
+        shell: powershell
+        run: ./scripts/xg-switch-position-v24.ps1
+      - name: Evaluate candidate 5 with XG Roller++
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          CANDIDATE_RANK: '5'
+        run: ./scripts/xg-parallel-candidate-xgrpp-v25.ps1
+      - name: Upload recovered candidate screening record
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v47-mid42-candidate-5
+          path: |
+            xg-v18-candidate-5-report.txt
+            xg-v18-candidate-5-baseline.txt
+            xg-v18-candidate-5-baseline.json
+            xg-v18-candidate-5-final.txt
+            xg-v18-candidate-5-xgrpp.json
+            xg-v18-candidate-5-*.png
+            xg-v24-switch-mid42-report.txt
+            xg-install-v47-c5.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Publish candidate final status
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          $state=if($env:JOB_STATUS-eq'success'){'success'}else{'failure'}
+          $payload=@{state=$state;context='xg-v47/candidate-5/job';description="candidate 5 job=$env:JOB_STATUS"}|ConvertTo-Json -Compress
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+          $payload=@{state='success';context='xg-v47/candidate-5/runner';description='runner reached final status'}|ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
+
+  aggregate-screening:
+    name: aggregate-mid42-recovered-xgrpp
+    needs: recover-candidate-5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download prior successful candidates 1-4
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xg-v43-mid42-candidate-[1-4]
+          path: artifacts
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.BASE_SCREENING_RUN_ID }}
+      - name: Download recovered candidate 5
+        uses: actions/download-artifact@v4
+        with:
+          name: xg-v47-mid42-candidate-5
+          path: artifacts
+          merge-multiple: true
+      - name: Aggregate recovered XGR++ screening label
+        run: |
+          python scripts/aggregate_xgrpp_screening.py artifacts xg-v47-mid42-screening.json | tee xg-v47-mid42-summary.txt
+      - name: Upload recovered XGR++ audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v47-mid42-xgrpp-audit
+          path: |
+            xg-v47-mid42-screening.json
+            xg-v47-mid42-summary.txt
+          retention-days: 30
+      - name: Publish screening gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          d=json.load(open('xg-v47-mid42-screening.json'))
+          desc=f"mid42 recovered XGR++ best={d['best_move']}; gap={d['top1_gap']:.3f}; fresh={d['fresh_xgrpp_count']}"
+          payload=json.dumps({'state':'success','context':'xg-v47/mid42-screening','description':desc}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
