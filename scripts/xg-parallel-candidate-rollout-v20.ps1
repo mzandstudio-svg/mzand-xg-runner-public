@@ -1,7 +1,8 @@
-# v20: adaptive rollout depth wrapper for 1296 or 5184 games
+# v20: adaptive rollout depth wrapper for the development teacher ladder
 $ErrorActionPreference='Stop'
+$supportedGames=@(1296,5184,10368,20736,46656)
 $requestedGames=if($env:ROLLOUT_GAMES){[int]$env:ROLLOUT_GAMES}else{1296}
-if($requestedGames-notin@(1296,5184)){throw "ROLLOUT_GAMES must be 1296 or 5184, got $requestedGames"}
+if($requestedGames-notin$supportedGames){throw "ROLLOUT_GAMES must be one of $($supportedGames -join ', '), got $requestedGames"}
 $env:ROLLOUT_GAMES=[string]$requestedGames
 
 $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-parallel-candidate-rollout-v19.ps1'
@@ -13,10 +14,20 @@ Set-Content $tmp $generated -Encoding UTF8
 & $tmp
 '@
 $tailNew=@'
+$supportedGames=@(1296,5184,10368,20736,46656)
 $requestedGames=[int]$env:ROLLOUT_GAMES
-if($requestedGames-notin@(1296,5184)){throw "ROLLOUT_GAMES must be 1296 or 5184, got $requestedGames"}
+if($requestedGames-notin$supportedGames){throw "ROLLOUT_GAMES must be one of $($supportedGames -join ', '), got $requestedGames"}
 if($requestedGames-ne1296){
+  $timeoutByGames=@{
+    '5184'=4200
+    '10368'=7200
+    '20736'=12000
+    '46656'=18000
+  }
+  $timeoutSeconds=[int]$timeoutByGames[[string]$requestedGames]
+  if($timeoutSeconds-le0){throw "No rollout timeout configured for $requestedGames games"}
   $gameText=[string]$requestedGames
+  $timeoutText=[string]$timeoutSeconds
   $gameControlMarker='Shot "$prefix-before-ok"'
   $gameControlLines=@(
     '$pdesc=$prompt.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)'
@@ -52,9 +63,9 @@ if($requestedGames-ne1296){
 
   # The generated v16/v19 script has a single hard-coded depth contract. After
   # configuring the prompt control, rewrite completion provenance, record metadata,
-  # status text and diagnostics to the requested deeper rollout count.
+  # status text and the polling timeout to the requested deeper rollout count.
   $generated=$generated.Replace('1296',$gameText)
-  $generated=$generated.Replace('1200','3600')
+  $generated=$generated.Replace('1200',$timeoutText)
 }
 $tmp=Join-Path $env:RUNNER_TEMP "xg-v20-candidate-$env:CANDIDATE_RANK-$requestedGames.ps1"
 Set-Content $tmp $generated -Encoding UTF8
