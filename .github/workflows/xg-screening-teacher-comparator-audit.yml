@@ -1,0 +1,83 @@
+name: XG Screening Teacher Comparator Audit
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-screening-teacher-comparator-audit.yml
+      - scripts/compare_screening_label_to_teacher.py
+      - references/xg-v26-mid31-teacher.json
+      - references/xg-v27-mid31-screening.json
+      - references/xg-v27-mid31-coverage.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  comparator-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild known mid31 coverage audit
+        run: |
+          python scripts/compare_screening_label_to_teacher.py \
+            references/xg-v27-mid31-screening.json \
+            references/xg-v26-mid31-teacher.json \
+            generated-mid31-coverage.json
+      - name: Verify frozen key metrics
+        run: |
+          python - <<'PY'
+          import json
+          generated=json.load(open('generated-mid31-coverage.json'))
+          frozen=json.load(open('references/xg-v27-mid31-coverage.json'))
+          exact_keys=('xgid','teacher_best_move','screening_best_move','top1_match','candidate_set_match','method_mix','reused_existing_count','fresh_xgrpp_count')
+          for key in exact_keys:
+              assert generated[key] == frozen[key], (key, generated[key], frozen[key])
+          for key in ('spearman_rank_correlation','pairwise_order_accuracy'):
+              assert abs(float(generated[key])-float(frozen[key])) < 1e-12, (key, generated[key], frozen[key])
+          assert [c['move'] for c in generated['screening_candidates']] == [c['move'] for c in frozen['screening_candidates']]
+          assert [c['move'] for c in generated['teacher_candidates']] == [c['move'] for c in frozen['teacher_candidates']]
+          print('known_mid31_coverage_rebuild=PASS')
+          PY
+      - name: Verify sensitive benchmark rejection
+        run: |
+          python - <<'PY'
+          import json
+          src=json.load(open('references/xg-v27-mid31-screening.json'))
+          src['scope']='pristine blind benchmark'
+          json.dump(src, open('synthetic-sensitive-screening.json','w'), indent=2)
+          PY
+          if python scripts/compare_screening_label_to_teacher.py \
+            synthetic-sensitive-screening.json \
+            references/xg-v26-mid31-teacher.json \
+            should-not-exist.json; then
+            echo 'Sensitive benchmark guard unexpectedly accepted synthetic blind scope' >&2
+            exit 1
+          fi
+          test ! -e should-not-exist.json
+          echo 'sensitive_benchmark_guard=PASS'
+      - name: Publish comparator audit status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          payload=json.dumps({'state':'success','context':'xg-dev/comparator-audit','description':'mid31 rebuild and sensitive benchmark guard passed'}).encode()
+          req=urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",
+              data=payload,
+              method='POST',
+              headers={
+                  'Authorization':f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept':'application/vnd.github+json',
+                  'X-GitHub-Api-Version':'2022-11-28',
+                  'Content-Type':'application/json',
+              },
+          )
+          urllib.request.urlopen(req).read()
+          PY
