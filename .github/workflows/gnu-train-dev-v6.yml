@@ -39,6 +39,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
+      - name: Publish v6 run marker
+        if: matrix.shard == 0
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-v6-bootstrap/run-$GITHUB_RUN_ID\",\"description\":\"3-ply Huge GNU labeling started\"}" >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -70,6 +79,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Publish v6 training marker
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-v6-bootstrap/train\",\"description\":\"hybrid rank/equity training\"}" >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
@@ -109,6 +126,16 @@ jobs:
           grep -q '^DEV_USED_FOR_MODEL_SELECTION: False$' mzand-gnu-v6-report.txt
           grep -q '^PRISTINE_DATA_USED: False$' mzand-gnu-v6-report.txt
           grep -q '^XG_LABELS_USED: False$' mzand-gnu-v6-report.txt
+      - name: Publish v6 evidence status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          metric=$(grep '^DEV_STRICT_TOP1:' mzand-gnu-v6-report.txt | awk '{print $2}')
+          n=$(grep '^DEV_POSITION_SAMPLES:' mzand-gnu-v6-report.txt | awk '{print $2}')
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-v6-bootstrap/evidence\",\"description\":\"held-out Top-1=$metric n=$n\"}" >/dev/null
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -121,3 +148,14 @@ jobs:
             mzand-gnu-v6-report.txt
           if-no-files-found: ignore
           retention-days: 14
+      - name: Publish v6 final job status
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          state=failure; [ "$JOB_STATUS" = success ] && state=success
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"$state\",\"context\":\"gnu-v6-bootstrap/train\",\"description\":\"job=$JOB_STATUS\"}" >/dev/null
