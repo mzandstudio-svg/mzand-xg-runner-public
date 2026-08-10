@@ -37,6 +37,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
+      - name: Publish v3 run id early
+        if: matrix.shard == 0
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-train-v3/run-$GITHUB_RUN_ID\",\"description\":\"eight-shard GNU labeling started\"}" >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -70,16 +79,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Publish GNU v3 run id
+      - name: Publish GNU v3 training state
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          post() { curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"$2\",\"context\":\"$1\",\"description\":\"$3\"}" >/dev/null; }
-          post "gnu-train-v3/run-$GITHUB_RUN_ID" success "workflow run id=$GITHUB_RUN_ID"
-          post "gnu-train-v3/job" pending "eight-shard GNU candidate training"
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-train-v3/job\",\"description\":\"shards complete; candidate training\"}" >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
@@ -89,7 +96,7 @@ jobs:
           pattern: gnu-v3-shard-*
           path: shards
           merge-multiple: true
-      - name: Combine strictly non-pristine development corpus
+      - name: Combine non-pristine corpus
         shell: bash
         run: |
           set -euxo pipefail
@@ -100,10 +107,8 @@ jobs:
           echo "TOTAL_POSITIONS: $(wc -l < gnu-teacher-batch-v3.jsonl)" | tee gnu-v3-combined-report.txt
           echo "PRISTINE_DATA_USED: False" >> gnu-v3-combined-report.txt
       - name: Install ML stack
-        shell: bash
         run: python -m pip install --disable-pip-version-check -q numpy scikit-learn joblib xgboost
       - name: Select on tune, freeze, then evaluate held-out dev
-        shell: bash
         env:
           GNU_BATCH_OUT: gnu-teacher-batch-v3.jsonl
           MZAND_MODEL_OUT: mzand-gnu-v3.joblib
@@ -117,9 +122,8 @@ jobs:
           set -euo pipefail
           metric=$(grep '^DEV_STRICT_TOP1:' mzand-gnu-v2-report.txt | awk '{print $2}')
           n=$(grep '^DEV_POSITION_SAMPLES:' mzand-gnu-v2-report.txt | awk '{print $2}')
-          scope=$(grep '^METRIC_SCOPE:' mzand-gnu-v2-report.txt | cut -d: -f2- | xargs)
           curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-train-v3/evidence\",\"description\":\"held-out Top5-rerank Top-1=$metric n=$n\"}" >/dev/null
-          printf 'DEV_STRICT_TOP1: %s\nDEV_N: %s\nMETRIC_SCOPE: %s\n' "$metric" "$n" "$scope" > gnu-v3-gate-report.txt
+          printf 'DEV_STRICT_TOP1: %s\nDEV_N: %s\n' "$metric" "$n" > gnu-v3-gate-report.txt
       - name: Upload v3 evidence
         if: always()
         uses: actions/upload-artifact@v7
