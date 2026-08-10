@@ -38,9 +38,11 @@ jobs:
           set confirm new off
           set confirm save off
           set display off
+          set sound enable off
           set rollout trials 36
           set rollout quasirandom on
           set rollout seed 20260812
+          new game
           set board $base
           set dice 3 1
           hint 5
@@ -50,6 +52,7 @@ jobs:
           EOF
             timeout 600 gnubg -t -r -c "candidate-${rank}.commands" > "candidate-${rank}.out" 2>&1
             test -s "candidate-${rank}.out"
+            ! grep -Eq 'There must be a game in progress|You must set up a board first|No position specified' "candidate-${rank}.out"
           done
       - name: Parse rollout evidence
         shell: python
@@ -66,9 +69,7 @@ jobs:
                   for m in re.finditer(r'(?<![A-Za-z0-9])([+-]?\d+\.\d+)', line):
                       try: numbers.append((line, float(m.group(1))))
                       except ValueError: pass
-              labelled = []
-              for line, value in numbers:
-                  if re.search(r'(?i)equity', line): labelled.append((line, value))
+              labelled = [(line, value) for line, value in numbers if re.search(r'(?i)equity', line)]
               chosen = labelled[-1] if labelled else (numbers[-1] if numbers else None)
               return {
                   'equity': None if chosen is None else chosen[1],
