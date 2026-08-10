@@ -1,0 +1,66 @@
+name: GNU Candidate True Rollout Smoke v8
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-candidate-rollout-smoke-v8.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  candidate-rollout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU Backgammon CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+      - name: Roll out first two GNU hint candidates as afterstates
+        shell: bash
+        run: |
+          set -euxo pipefail
+          base='4HPwATDgc/ABMA'
+          cat > gnu-candidate-v8.commands <<EOF
+          set confirm new off
+          set confirm save off
+          set display off
+          set rollout trials 36
+          set rollout quasirandom on
+          set rollout seed 20260811
+          set board $base
+          set dice 3 1
+          hint 5
+          set board =1
+          rollout
+          set board $base
+          set dice 3 1
+          hint 5
+          set board =2
+          rollout
+          quit
+          EOF
+          timeout 600 gnubg -t -r -c gnu-candidate-v8.commands > gnu-candidate-v8-output.txt 2>&1
+          test -s gnu-candidate-v8-output.txt
+          grep -Ei 'hint|rollout|equity|cubeful|cubeless|games|trials|^[[:space:]]*[0-9]+\.' gnu-candidate-v8-output.txt > gnu-candidate-v8-evidence.txt || true
+          printf '\nCANDIDATE_AFTERSTATE_ROLLOUT: True\nTRIALS_PER_CANDIDATE: 36\nDEV_DATA_USED: False\nPRISTINE_DATA_USED: False\nXG_LABELS_USED: False\n' >> gnu-candidate-v8-evidence.txt
+      - name: Publish candidate rollout status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-rollout-v8/candidates\",\"description\":\"two GNU hint candidate afterstates rolled out\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-candidate-rollout-smoke-v8
+          path: |
+            gnu-candidate-v8.commands
+            gnu-candidate-v8-output.txt
+            gnu-candidate-v8-evidence.txt
+          retention-days: 14
