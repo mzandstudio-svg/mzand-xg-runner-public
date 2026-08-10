@@ -1,4 +1,4 @@
-name: XG Midgame XG Roller++ v15
+name: XG Midgame XG Roller++ v16
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/xg-midgame-xgrpp-v15.yml
       - scripts/xg-run-midgame-xgrpp-export-v15.ps1
+      - scripts/xg-run-midgame-xgrpp-export-v16.ps1
       - scripts/xg-switch-midgame-v15.ps1
       - scripts/xg-run-position-analysis-v8.ps1
       - scripts/xg-reach-xgid.ps1
@@ -27,8 +28,8 @@ jobs:
           GATE_SHA: ${{ github.sha }}
         run: |
           function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
-          Post 'xg-public-v15/runner-start' 'pending' 'Public Windows runner started'
-          Post "xg-public-v15/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
+          Post 'xg-public-v16/runner-start' 'pending' 'Public Windows runner started'
+          Post "xg-public-v16/run-$env:GITHUB_RUN_ID" 'success' "workflow run id=$env:GITHUB_RUN_ID"
       - uses: actions/checkout@v4
       - name: Install XG
         shell: powershell
@@ -51,12 +52,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GATE_SHA: ${{ github.sha }}
-        run: ./scripts/xg-run-midgame-xgrpp-export-v15.ps1
+        run: ./scripts/xg-run-midgame-xgrpp-export-v16.ps1
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: xg-midgame-xgrpp-v15
+          name: xg-midgame-xgrpp-v16
           path: |
             xg-install.log
             xg-reach-xgid-report.txt
@@ -68,6 +69,7 @@ jobs:
             xg-v15-before-xgrpp.txt
             xg-v15-after-xgrpp.txt
             xg-v15-*.png
+            xg-v16-*.png
           if-no-files-found: ignore
           retention-days: 14
       - name: Publish final status
@@ -80,6 +82,6 @@ jobs:
         run: |
           function Post([string]$context,[string]$state,[string]$description){$payload=@{state=$state;context=$context;description=$description}|ConvertTo-Json -Compress;$headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'};Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null}
           $ok=Test-Path "$env:GITHUB_WORKSPACE\xg-v15-after-xgrpp.txt"
-          Post 'xg-public-v15/evidence' ($(if($ok){'success'}else{'failure'})) "after-export evidence=$ok"
-          Post 'xg-public-v15/job' ($(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})) "job=$env:JOB_STATUS"
-          Post 'xg-public-v15/runner-start' 'success' 'runner reached final status'
+          Post 'xg-public-v16/evidence' ($(if($ok){'success'}else{'failure'})) "after-export evidence=$ok"
+          Post 'xg-public-v16/job' ($(if($env:JOB_STATUS-eq'success'){'success'}else{'failure'})) "job=$env:JOB_STATUS"
+          Post 'xg-public-v16/runner-start' 'success' 'runner reached final status'
