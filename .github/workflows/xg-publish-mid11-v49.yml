@@ -1,0 +1,81 @@
+name: XG Publish Development mid11 v49
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-publish-mid11-v49.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+  statuses: write
+
+env:
+  FREEZE_RUN_ID: '31359508323'
+  TEACHER_ARTIFACT_ID: '9051813115'
+
+jobs:
+  publish-mid11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Publish runner and run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          payload=json.dumps({'state':'success','context':f"xg-v49/run-{os.environ['GITHUB_RUN_ID']}",'description':f"workflow run id={os.environ['GITHUB_RUN_ID']}"}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: xg-teacher-parallel-v16
+          fetch-depth: 0
+      - name: Download frozen mid11 evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: xg-v48-mid11-frozen-references
+          path: frozen
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.FREEZE_RUN_ID }}
+      - name: Add aggregate artifact provenance and prepare references
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          teacher=json.load(open('frozen/xg-v48-mid11-teacher.json'))
+          coverage=json.load(open('frozen/xg-v48-mid11-coverage.json'))
+          artifact_id=int(os.environ['TEACHER_ARTIFACT_ID'])
+          teacher['source_artifact_id']=artifact_id
+          coverage['teacher_source_artifact_id']=artifact_id
+          coverage['scope']='non-pristine development coverage audit'
+          pathlib.Path('references').mkdir(exist_ok=True)
+          json.dump(teacher, open('references/xg-v48-mid11-teacher.json','w'), indent=2)
+          open('references/xg-v48-mid11-teacher.json','a').write('\n')
+          json.dump(coverage, open('references/xg-v48-mid11-coverage.json','w'), indent=2)
+          open('references/xg-v48-mid11-coverage.json','a').write('\n')
+          assert teacher['adaptive_depth']['accept_current_depth'] is True
+          assert teacher['adaptive_depth']['current_games'] == 5184
+          assert coverage['top1_match'] is True
+          assert coverage['candidate_set_match'] is True
+          print('mid11_publish_contract=PASS')
+          PY
+      - name: Commit frozen references
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git pull --rebase origin xg-teacher-parallel-v16
+          git add references/xg-v48-mid11-teacher.json references/xg-v48-mid11-coverage.json
+          if git diff --cached --quiet; then
+            echo 'mid11 references already published'
+            exit 0
+          fi
+          git commit -m 'Freeze decisive 5184-game mid11 development evidence'
+          git push origin HEAD:xg-teacher-parallel-v16
