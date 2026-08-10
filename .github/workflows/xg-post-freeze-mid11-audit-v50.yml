@@ -1,0 +1,103 @@
+name: XG Post-Freeze mid11 Audit v50
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-post-freeze-mid11-audit-v50.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Publish runner and run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          def post(context, state, description):
+              payload=json.dumps({'state':state,'context':context,'description':description}).encode()
+              req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+              urllib.request.urlopen(req).read()
+          post(f"xg-v50/run-{os.environ['GITHUB_RUN_ID']}", 'success', f"workflow run id={os.environ['GITHUB_RUN_ID']}")
+          post('xg-v50/post-freeze-audit', 'pending', 'auditing development corpus after mid11 freeze')
+          PY
+      - uses: actions/checkout@v4
+      - name: Verify frozen mid11 references are present
+        run: |
+          test -f references/xg-v48-mid11-teacher.json
+          test -f references/xg-v48-mid11-coverage.json
+          python - <<'PY'
+          import json
+          t=json.load(open('references/xg-v48-mid11-teacher.json'))
+          c=json.load(open('references/xg-v48-mid11-coverage.json'))
+          assert t['adaptive_depth']['accept_current_depth'] is True
+          assert t['adaptive_depth']['current_games'] == 5184
+          assert c['top1_match'] is True
+          assert c['candidate_set_match'] is True
+          print('frozen_mid11_reference_contract=PASS')
+          PY
+      - name: Audit development XGR++ coverage corpus
+        run: |
+          python scripts/aggregate_coverage_corpus.py references xg-development-coverage-summary.json | tee xg-development-coverage-summary.txt
+      - name: Build development teacher corpus
+        run: |
+          python scripts/build_development_teacher_corpus.py references development-teacher-corpus | tee development-teacher-corpus.txt
+      - name: Train and LOPO-test residual reranker
+        run: |
+          python scripts/train_development_residual_reranker.py references xg-development-reranker-audit.json | tee xg-development-reranker-audit.txt
+      - name: Verify expanded corpus expectations
+        run: |
+          python - <<'PY'
+          import json
+          coverage=json.load(open('xg-development-coverage-summary.json'))
+          teacher=json.load(open('development-teacher-corpus/teacher_corpus_summary.json'))
+          rerank=json.load(open('xg-development-reranker-audit.json'))
+          assert coverage['position_count'] == 7, coverage
+          assert coverage['top1_hits'] == 7, coverage
+          assert coverage['development_top1_accuracy'] == 1.0, coverage
+          assert coverage['candidate_set_hits'] == 7, coverage
+          assert coverage['decisive_pair_wrong'] == 0, coverage
+          assert teacher['teacher_position_count'] == 7, teacher
+          assert rerank['position_count'] == 7, rerank
+          print(f"development_top1={coverage['top1_hits']}/{coverage['position_count']}")
+          print(f"development_decisive_pairs={coverage['decisive_pair_correct']}/{coverage['decisive_pair_count']}")
+          print(f"reranker_top1={rerank['reranker']['top1_hits']}/{rerank['reranker']['position_count']}")
+          print(f"reranker_adopt={rerank['adopt_candidate']}")
+          PY
+      - name: Upload post-freeze audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-v50-post-freeze-mid11-audit
+          path: |
+            xg-development-coverage-summary.json
+            xg-development-coverage-summary.txt
+            development-teacher-corpus/
+            development-teacher-corpus.txt
+            xg-development-reranker-audit.json
+            xg-development-reranker-audit.txt
+          retention-days: 30
+      - name: Publish final audit status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          c=json.load(open('xg-development-coverage-summary.json')); r=json.load(open('xg-development-reranker-audit.json'))
+          desc=(f"dev top1={c['top1_hits']}/{c['position_count']}; decisive={c['decisive_pair_correct']}/{c['decisive_pair_count']}; "
+                f"rerank={r['reranker']['top1_hits']}/{r['reranker']['position_count']} adopt={r['adopt_candidate']}")
+          payload=json.dumps({'state':'success','context':'xg-v50/post-freeze-audit','description':desc}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
