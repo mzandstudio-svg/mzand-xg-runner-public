@@ -73,9 +73,24 @@ def main():
         c["screening_elapsed_seconds"]=int(r.get("elapsed_seconds",0))
         sitems.append(c)
     sitems.sort(key=lambda c: float(c["equity"]), reverse=True)
-    for i,c in enumerate(sitems,1): c["screening_rank"]=i
+    screening_best=float(sitems[0]["equity"])
+    for i,c in enumerate(sitems,1):
+        c["rank"]=i
+        c["screening_rank"]=i
+        c["equity_delta"]=round(float(c["equity"])-screening_best,6)
+        c["source"]=c["screening_method"]
+        c["analysis_method"]=c["screening_method"]
 
-    titems=sorted(teacher["candidates"], key=lambda c:int(c["rollout_rank"]))
+    titems=sorted((dict(c) for c in teacher["candidates"]), key=lambda c:int(c["rollout_rank"]))
+    teacher_best=float(titems[0]["equity"])
+    for i,c in enumerate(titems,1):
+        c["rank"]=i
+        c["rollout_rank"]=i
+        c["equity_delta"]=round(float(c["equity"])-teacher_best,6)
+        c["equity_delta_from_best"]=c["equity_delta"]
+        c["source"]="Rollout"
+        c["analysis_method"]="Rollout"
+
     tmoves=[c["move"] for c in titems]
     smoves=[c["move"] for c in sitems]
     if set(tmoves) != set(smoves):
