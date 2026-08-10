@@ -25,7 +25,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0,1,2,3,4,5,6,7]
+        include:
+          - { shard: 0, offset: 0 }
+          - { shard: 1, offset: 96 }
+          - { shard: 2, offset: 192 }
+          - { shard: 3, offset: 288 }
+          - { shard: 4, offset: 384 }
+          - { shard: 5, offset: 480 }
+          - { shard: 6, offset: 576 }
+          - { shard: 7, offset: 672 }
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -45,7 +53,7 @@ jobs:
         shell: bash
         env:
           GNU_SHARD_INDEX: ${{ matrix.shard }}
-          GNU_GAME_OFFSET: ${{ matrix.shard * 96 }}
+          GNU_GAME_OFFSET: ${{ matrix.offset }}
         run: node scripts/gnu-teacher-batch-v3.mjs
       - name: Upload shard
         uses: actions/upload-artifact@v7
