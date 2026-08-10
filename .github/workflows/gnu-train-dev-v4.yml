@@ -1,4 +1,4 @@
-name: GNU MZand Train Development v4 All Dice
+name: GNU MZand Train Development v5 Pairwise Rank
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     paths:
       - .github/workflows/gnu-train-dev-v4.yml
       - scripts/gnu-teacher-all-dice-v4.mjs
-      - scripts/train-mzand-gnu-v4.py
+      - scripts/train-mzand-gnu-v5.py
   workflow_dispatch:
 
 permissions:
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - name: Publish v4 run id early
+      - name: Publish v5 run id early
         if: matrix.shard == 0
         shell: bash
         env:
@@ -46,7 +46,7 @@ jobs:
           GATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-train-v4/run-$GITHUB_RUN_ID\",\"description\":\"all-dice GNU labeling started\"}" >/dev/null
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-train-v5/run-$GITHUB_RUN_ID\",\"description\":\"all-dice GNU labeling started\"}" >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -67,7 +67,7 @@ jobs:
         run: node scripts/gnu-teacher-all-dice-v4.mjs
       - uses: actions/upload-artifact@v7
         with:
-          name: gnu-v4-shard-${{ matrix.shard }}
+          name: gnu-v5-shard-${{ matrix.shard }}
           path: |
             gnu-teacher-all-dice-v4-${{ matrix.shard }}.jsonl
             gnu-teacher-all-dice-v4-${{ matrix.shard }}-report.txt
@@ -76,23 +76,23 @@ jobs:
   train:
     needs: label
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
-      - name: Publish v4 training state
+      - name: Publish v5 training state
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-train-v4/job\",\"description\":\"all-dice candidate training\"}" >/dev/null
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-train-v5/job\",\"description\":\"pairwise hard-position ranking training\"}" >/dev/null
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
-          pattern: gnu-v4-shard-*
+          pattern: gnu-v5-shard-*
           path: shards
           merge-multiple: true
       - name: Combine all-dice corpus
@@ -101,37 +101,38 @@ jobs:
           set -euxo pipefail
           test "$(ls shards/gnu-teacher-all-dice-v4-*.jsonl | wc -l)" -eq 8
           cat shards/gnu-teacher-all-dice-v4-*.jsonl > gnu-teacher-all-dice-v4.jsonl
-          cat shards/gnu-teacher-all-dice-v4-*-report.txt > gnu-v4-shard-reports.txt
-          grep -q 'DICE_AUGMENTATION: ALL_21' gnu-v4-shard-reports.txt
-          echo "TOTAL_LABELS: $(wc -l < gnu-teacher-all-dice-v4.jsonl)" > gnu-v4-corpus-report.txt
-          echo 'PRISTINE_DATA_USED: False' >> gnu-v4-corpus-report.txt
+          cat shards/gnu-teacher-all-dice-v4-*-report.txt > gnu-v5-shard-reports.txt
+          grep -q 'DICE_AUGMENTATION: ALL_21' gnu-v5-shard-reports.txt
+          echo "TOTAL_LABELS: $(wc -l < gnu-teacher-all-dice-v4.jsonl)" > gnu-v5-corpus-report.txt
+          echo 'PRISTINE_DATA_USED: False' >> gnu-v5-corpus-report.txt
+          echo 'XG_LABELS_USED: False' >> gnu-v5-corpus-report.txt
       - name: Install ML stack
         run: python -m pip install --disable-pip-version-check -q numpy scikit-learn joblib xgboost
-      - name: Train all-dice evaluator and open held-out development gate
+      - name: Train pairwise hard-position ranker and open held-out development gate
         env:
           GNU_BATCH_OUT: gnu-teacher-all-dice-v4.jsonl
-        run: python scripts/train-mzand-gnu-v4.py
-      - name: Publish v4 evidence
+        run: python scripts/train-mzand-gnu-v5.py
+      - name: Publish v5 evidence
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GATE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          metric=$(grep '^DEV_STRICT_TOP1:' mzand-gnu-v4-report.txt | awk '{print $2}')
-          n=$(grep '^DEV_POSITION_SAMPLES:' mzand-gnu-v4-report.txt | awk '{print $2}')
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-train-v4/evidence\",\"description\":\"held-out Top5-rerank Top-1=$metric n=$n\"}" >/dev/null
-      - name: Upload v4 evidence
+          metric=$(grep '^DEV_STRICT_TOP1:' mzand-gnu-v5-report.txt | awk '{print $2}')
+          n=$(grep '^DEV_POSITION_SAMPLES:' mzand-gnu-v5-report.txt | awk '{print $2}')
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-train-v5/evidence\",\"description\":\"held-out Top5-rerank Top-1=$metric n=$n\"}" >/dev/null
+      - name: Upload v5 evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: gnu-mzand-train-dev-v4
+          name: gnu-mzand-train-dev-v5
           path: |
-            gnu-v4-corpus-report.txt
-            gnu-v4-shard-reports.txt
-            mzand-gnu-v4.joblib
-            mzand-gnu-v4-report.json
-            mzand-gnu-v4-report.txt
+            gnu-v5-corpus-report.txt
+            gnu-v5-shard-reports.txt
+            mzand-gnu-v5.joblib
+            mzand-gnu-v5-report.json
+            mzand-gnu-v5-report.txt
           if-no-files-found: ignore
           retention-days: 14
       - name: Publish final status
@@ -144,4 +145,4 @@ jobs:
         run: |
           set -euo pipefail
           state=failure; [ "$JOB_STATUS" = success ] && state=success
-          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"$state\",\"context\":\"gnu-train-v4/job\",\"description\":\"job=$JOB_STATUS\"}" >/dev/null
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" -d "{\"state\":\"$state\",\"context\":\"gnu-train-v5/job\",\"description\":\"job=$JOB_STATUS\"}" >/dev/null
