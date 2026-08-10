@@ -1,0 +1,121 @@
+name: XG Development Evidence Freezer Audit
+
+on:
+  push:
+    branches: [xg-teacher-parallel-v16]
+    paths:
+      - .github/workflows/xg-development-freezer-audit.yml
+      - scripts/freeze_development_position.py
+      - scripts/compare_screening_label_to_teacher.py
+      - references/xg-v33-mid65-teacher.json
+      - references/xg-v34-mid65-coverage.json
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  freezer-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publish runner and run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          payload=json.dumps({'state':'success','context':f"xg-dev/freezer-run-{os.environ['GITHUB_RUN_ID']}",'description':f"workflow run id={os.environ['GITHUB_RUN_ID']}"}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
+      - uses: actions/checkout@v4
+      - name: Reconstruct mid65 evidence inputs
+        run: |
+          python - <<'PY'
+          import json
+          teacher=json.load(open('references/xg-v33-mid65-teacher.json'))
+          coverage=json.load(open('references/xg-v34-mid65-coverage.json'))
+          depth=teacher['adaptive_depth']
+          raw_teacher=dict(teacher)
+          for key in ('adaptive_depth','source_run_id','source_commit','source_artifact_id'):
+              raw_teacher.pop(key, None)
+          screening={
+              'schema':'mzand.xg.screening-label.v1',
+              'scope':'non-pristine development position',
+              'xgid':coverage['xgid'],
+              'candidate_count':len(coverage['screening_candidates']),
+              'best_move':coverage['screening_best_move'],
+              'best_equity':coverage['screening_candidates'][0]['equity'],
+              'second_move':coverage['screening_candidates'][1]['move'],
+              'second_equity':coverage['screening_candidates'][1]['equity'],
+              'top1_gap':coverage['screening_candidates'][0]['equity']-coverage['screening_candidates'][1]['equity'],
+              'screening_method_mix':coverage['method_mix'],
+              'reused_existing_count':coverage['reused_existing_count'],
+              'fresh_xgrpp_count':coverage['fresh_xgrpp_count'],
+              'candidates':coverage['screening_candidates'],
+          }
+          json.dump(raw_teacher, open('raw-teacher.json','w'), indent=2)
+          json.dump(depth, open('depth.json','w'), indent=2)
+          json.dump(screening, open('screening.json','w'), indent=2)
+          PY
+      - name: Freeze reconstructed mid65 evidence
+        run: |
+          python scripts/freeze_development_position.py \
+            raw-teacher.json depth.json screening.json \
+            generated-teacher.json generated-coverage.json \
+            --teacher-run-id 31356841500 \
+            --teacher-commit 245d7c28396fdd937584477d227939797c7adbff \
+            --teacher-artifact-id 9051077860 \
+            --screening-run-id 31356867011 \
+            --screening-commit 2e2a5d1bdf5e9fc618e33dd1af38f014affd3fff \
+            --screening-artifact-id 9050997214
+      - name: Verify frozen mid65 contract
+        run: |
+          python - <<'PY'
+          import json
+          generated_teacher=json.load(open('generated-teacher.json'))
+          frozen_teacher=json.load(open('references/xg-v33-mid65-teacher.json'))
+          generated=json.load(open('generated-coverage.json'))
+          frozen=json.load(open('references/xg-v34-mid65-coverage.json'))
+          for key in ('xgid','best_move','best_equity','adaptive_depth','source_run_id','source_commit','source_artifact_id'):
+              assert generated_teacher[key] == frozen_teacher[key], (key, generated_teacher[key], frozen_teacher[key])
+          for key in ('xgid','teacher_best_move','screening_best_move','top1_match','candidate_set_match','method_mix','reused_existing_count','fresh_xgrpp_count','source_run_id','source_commit','source_artifact_id','teacher_source_run_id','teacher_source_commit','teacher_source_artifact_id'):
+              assert generated[key] == frozen[key], (key, generated[key], frozen[key])
+          for key in ('spearman_rank_correlation','pairwise_order_accuracy'):
+              assert abs(float(generated[key])-float(frozen[key])) < 1e-12
+          assert [c['move'] for c in generated['screening_candidates']] == [c['move'] for c in frozen['screening_candidates']]
+          assert [c['move'] for c in generated['teacher_candidates']] == [c['move'] for c in frozen['teacher_candidates']]
+          print('mid65_freeze_rebuild=PASS')
+          PY
+      - name: Verify non-decisive teacher rejection
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('depth.json'))
+          d['accept_current_depth']=False
+          d['reason']='synthetic_non_decisive'
+          json.dump(d, open('nondecisive-depth.json','w'), indent=2)
+          PY
+          if python scripts/freeze_development_position.py raw-teacher.json nondecisive-depth.json screening.json should-not-teacher.json should-not-coverage.json; then
+            echo 'Freezer unexpectedly accepted non-decisive teacher' >&2
+            exit 1
+          fi
+          test ! -e should-not-teacher.json
+          test ! -e should-not-coverage.json
+          echo 'non_decisive_guard=PASS'
+      - name: Publish freezer audit status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          payload=json.dumps({'state':'success','context':'xg-dev/freezer-audit','description':'decisive freeze rebuild and non-decisive guard passed'}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",data=payload,method='POST',headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'})
+          urllib.request.urlopen(req).read()
+          PY
