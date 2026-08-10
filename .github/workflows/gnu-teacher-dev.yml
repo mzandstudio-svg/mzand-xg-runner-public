@@ -1,5 +1,6 @@
 name: GNU Teacher Development v1
 
+# CI trigger: validate the headless GNU teacher bridge on main.
 on:
   push:
     branches: [main]
