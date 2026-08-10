@@ -5,6 +5,8 @@ on:
     branches: [xg-teacher-parallel-v16]
     paths:
       - .github/workflows/xg-hard-xgrpp-mid42-v43.yml
+      - scripts/xg-parallel-candidate-xgrpp-v25.ps1
+      - scripts/xg-parallel-candidate-xgrpp-v21.ps1
   workflow_dispatch:
 
 permissions:
