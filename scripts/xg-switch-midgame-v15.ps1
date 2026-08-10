@@ -12,7 +12,7 @@ public static class V15S {
 $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
 $xg.Refresh()
 $before=$xg.MainWindowTitle
-$mid='XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10'
+$mid='XGID=-a----EaCA--eD---a-cbA--bA:0:0:1:33:0:0:0:5:10'
 $report="$env:GITHUB_WORKSPACE\xg-v15-switch-report.txt"
 "MIDGAME_XGID: $mid"|Out-File $report
 "TITLE_BEFORE_SWITCH: $before"|Out-File $report -Append
