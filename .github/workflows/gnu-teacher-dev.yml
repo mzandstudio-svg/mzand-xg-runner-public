@@ -1,0 +1,49 @@
+name: GNU Teacher Development v1
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/gnu-teacher-dev.yml
+      - scripts/gnu-teacher-smoke.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gnu-teacher-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install GNU teacher bridge
+        shell: bash
+        run: |
+          set -euxo pipefail
+          npm init -y
+          npm install --no-audit --no-fund @nodots/backgammon-ai@1.1.2 @nodots/backgammon-core@1.0.0
+      - name: Generate GNU development labels
+        shell: bash
+        env:
+          GNU_MAX_HINTS: '5'
+        run: node scripts/gnu-teacher-smoke.mjs
+      - name: Validate label count
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s gnu-teacher-samples.jsonl
+          test "$(wc -l < gnu-teacher-samples.jsonl)" -eq 21
+          grep -q 'ROLLS_COMPLETED: 21' gnu-teacher-report.txt
+          grep -q 'PRISTINE_DATA_USED: False' gnu-teacher-report.txt
+      - name: Upload GNU teacher evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: gnu-teacher-dev-v1
+          path: |
+            gnu-teacher-samples.jsonl
+            gnu-teacher-report.txt
+          retention-days: 14
