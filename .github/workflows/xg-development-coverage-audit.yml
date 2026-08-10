@@ -20,6 +20,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Publish audit run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, urllib.request
+          context=f"xg-dev/run-{os.environ['GITHUB_RUN_ID']}"
+          payload=json.dumps({'state':'success','context':context,'description':'development-only coverage audit run id'}).encode()
+          req=urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/statuses/{os.environ['GATE_SHA']}",
+              data=payload,
+              method='POST',
+              headers={
+                  'Authorization':f"Bearer {os.environ['GH_TOKEN']}",
+                  'Accept':'application/vnd.github+json',
+                  'X-GitHub-Api-Version':'2022-11-28',
+                  'Content-Type':'application/json',
+              },
+          )
+          urllib.request.urlopen(req).read()
+          PY
+
       - name: Aggregate frozen non-pristine coverage audits
         run: |
           python scripts/aggregate_coverage_corpus.py references xg-development-coverage-summary.json | tee xg-development-coverage-summary.txt
