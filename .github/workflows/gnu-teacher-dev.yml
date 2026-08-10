@@ -2,7 +2,9 @@ name: GNU Teacher Development v2
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'automation/gnu-teacher-*'
     paths:
       - .github/workflows/gnu-teacher-dev.yml
       - scripts/gnu-teacher-smoke.mjs
