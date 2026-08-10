@@ -1,0 +1,172 @@
+name: GNU Mined Top1 Rollout v12
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-mined-top1-rollout-v12.yml
+      - scripts/gnu-teacher-v6.mjs
+      - scripts/train-mzand-gnu-v7.py
+      - scripts/mine-gnu-v8-top1-errors.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  GNU_V6_GAMES: '8'
+  GNU_V6_TURNS: '10'
+  GNU_V6_MAX_HINTS: '16'
+  GNU_V6_SEED_BASE: '1220260810'
+  GNU_V6_HARD_MARGIN: '0.03'
+  GNU_V6_ROLLOUT_MARGIN: '0.012'
+
+jobs:
+  mined-rollout-1296:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish run marker
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"pending\",\"context\":\"gnu-rollout-v12/run-$GITHUB_RUN_ID\",\"description\":\"1296-trial mined GNU rollouts started\"}" >/dev/null
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install GNU and ML dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg build-essential pkg-config libglib2.0-dev
+          npm init -y
+          npm install --no-audit --no-fund @nodots/backgammon-ai@1.1.2 @nodots/backgammon-core@1.0.0
+          python -m pip install --disable-pip-version-check -q numpy scikit-learn joblib xgboost
+      - name: Generate strictly non-pristine GNU corpus
+        shell: bash
+        run: |
+          set -euxo pipefail
+          : > gnu-teacher-v12.jsonl
+          : > gnu-v12-shard-reports.txt
+          for shard in 0 1 2 3; do
+            export GNU_V6_SHARD_INDEX="$shard"
+            export GNU_V6_GAME_OFFSET="$((shard * 8))"
+            node scripts/gnu-teacher-v6.mjs
+            cat "gnu-teacher-v6-${shard}.jsonl" >> gnu-teacher-v12.jsonl
+            cat "gnu-teacher-v6-${shard}-report.txt" >> gnu-v12-shard-reports.txt
+          done
+          ! grep -q 'PRISTINE_DATA_USED: True' gnu-v12-shard-reports.txt
+          ! grep -q 'XG_LABELS_USED: True' gnu-v12-shard-reports.txt
+      - name: Mine student Top-1 errors from train/tune only
+        env:
+          GNU_V8_BATCH_OUT: gnu-teacher-v12.jsonl
+          GNU_V8_ROLLOUT_QUEUE: gnu-v12-top1-rollout-queue.jsonl
+        run: python scripts/mine-gnu-v8-top1-errors.py
+      - name: Select highest-priority safe rank-2 errors
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          rows=[json.loads(x) for x in Path('gnu-v12-top1-rollout-queue.jsonl').read_text().splitlines() if x.strip()]
+          picked=[]
+          for r in rows:
+              if r.get('sourceSplit') not in ('train','tune'): continue
+              if r.get('pristine') is not False or r.get('xgLabelUsed') is not False: continue
+              if r.get('pickedRank') != 2: continue
+              if not r.get('positionId') or not r.get('dice'): continue
+              picked.append(r)
+              if len(picked) >= 4: break
+          if len(picked) < 2: raise SystemExit(f'insufficient safe rank-2 errors: {len(picked)}')
+          Path('gnu-v12-selected.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in picked))
+          print('SELECTED_TOP1_ERRORS:',len(picked))
+          print('DEV_ROWS_SELECTED: 0')
+      - name: True marked-move rollout ranks 1 and 2 at 1296 trials
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p v12-rollouts
+          i=0
+          while IFS= read -r row; do
+            i=$((i+1))
+            pos=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["positionId"])' "$row")
+            d1=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["dice"][0])' "$row")
+            d2=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["dice"][1])' "$row")
+            cat > "v12-rollouts/${i}.commands" <<EOF
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set evaluation chequerplay evaluation plies 3
+          set evaluation cubedecision evaluation plies 3
+          set rollout trials 1296
+          set rollout quasirandom on
+          set rollout seed $((20260840+i))
+          set rollout limit enable off
+          set rollout jsd stop off
+          new game
+          set board $pos
+          set dice $d1 $d2
+          clear hint
+          hint 16
+          cmark move set rollout 1 2
+          analyse rollout move
+          export position text v12-rollouts/${i}-position.txt
+          quit
+          EOF
+            timeout 7200 gnubg -t -r -c "v12-rollouts/${i}.commands" > "v12-rollouts/${i}-console.txt" 2>&1
+            test -s "v12-rollouts/${i}-position.txt"
+            ! grep -Eq 'There must be a game in progress|You must set up a board first|No position specified|No moves marked' "v12-rollouts/${i}-console.txt"
+            grep -E '^[[:space:]]*[12]\. Rollout' "v12-rollouts/${i}-position.txt" > "v12-rollouts/${i}-top2.txt"
+            test "$(wc -l < "v12-rollouts/${i}-top2.txt")" -eq 2
+          done < gnu-v12-selected.jsonl
+      - name: Verify rollout evidence and provenance
+        shell: python
+        run: |
+          import json,re
+          from pathlib import Path
+          selected=[json.loads(x) for x in Path('gnu-v12-selected.jsonl').read_text().splitlines() if x.strip()]
+          out=[]
+          for i,row in enumerate(selected,1):
+              text=Path(f'v12-rollouts/{i}-top2.txt').read_text()
+              vals=[]
+              for line in text.splitlines():
+                  m=re.search(r'^\s*(\d+)\.\s+Rollout\s+(.+?)\s+Eq\.:\s+([+-]?\d+\.\d+)',line)
+                  if not m: raise SystemExit(f'parse failure {i}: {line}')
+                  vals.append({'rank':int(m.group(1)),'moveText':m.group(2).strip(),'equity':float(m.group(3))})
+              out.append({'sourceSplit':row['sourceSplit'],'gameIndex':row.get('gameIndex'),'turn':row.get('turn'),'dice':row['dice'],'positionId':row['positionId'],'bootstrapTeacherMargin':row.get('teacherMargin'),'studentPickedRank':row.get('pickedRank'),'suggestedRolloutTrials':row.get('suggestedRolloutTrials'),'rollout':vals})
+          Path('gnu-v12-mined-rollout-evidence.json').write_text(json.dumps(out,indent=2)+'\n')
+          margins=[x['rollout'][0]['equity']-x['rollout'][1]['equity'] for x in out]
+          lines=['TEACHER: GNU_BACKGAMMON_TRUE_MARKED_MOVE_ROLLOUT','TRIALS_PER_MARKED_MOVE: 1296',f'ROLLED_OUT_TOP1_ERROR_POSITIONS: {len(out)}',f'MIN_ROLLOUT_TOP2_MARGIN: {min(margins):.6f}',f'MEAN_ROLLOUT_TOP2_MARGIN: {sum(margins)/len(margins):.6f}','DEV_DATA_USED: False','PRISTINE_DATA_USED: False','XG_LABELS_USED: False']
+          Path('gnu-v12-mined-rollout-evidence.txt').write_text('\n'.join(lines)+'\n')
+          print(Path('gnu-v12-mined-rollout-evidence.txt').read_text())
+      - name: Publish verified evidence status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          n=$(grep '^ROLLED_OUT_TOP1_ERROR_POSITIONS:' gnu-v12-mined-rollout-evidence.txt | awk '{print $2}')
+          margin=$(grep '^MEAN_ROLLOUT_TOP2_MARGIN:' gnu-v12-mined-rollout-evidence.txt | awk '{print $2}')
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-rollout-v12/mined-errors\",\"description\":\"1296-trial GNU rollout n=$n mean-margin=$margin\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-mined-top1-rollout-v12
+          path: |
+            gnu-v12-shard-reports.txt
+            gnu-v8-top1-rollout-queue-report.txt
+            gnu-v12-selected.jsonl
+            gnu-v12-mined-rollout-evidence.json
+            gnu-v12-mined-rollout-evidence.txt
+            v12-rollouts/
+          if-no-files-found: ignore
+          retention-days: 14
