@@ -1,0 +1,117 @@
+name: GNU Played Candidate Rollout Hint v26
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-play-rollout-hint-v26.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  rollout-hint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU Backgammon
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+      - name: Play candidates, rollout afterstates, then print cached hint
+        shell: bash
+        run: |
+          set -euxo pipefail
+          moves=('18/13(2) 6/1*(2)' '8/3(2) 6/1*(2)')
+          for idx in 0 1; do
+            rank=$((idx+1)); move="${moves[$idx]}"
+            cat > "rollhint-${rank}.commands" <<EOF
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set player 0 human
+          set player 1 human
+          set turn 0
+          set rollout trials 36
+          set rollout quasirandom on
+          set rollout seed $((20262600+rank))
+          set rollout limit enable off
+          set rollout jsd stop off
+          new game
+          set board mHPMBSDg88TBAA
+          set turn 0
+          set dice 5 5
+          $move
+          rollout
+          hint
+          quit
+          EOF
+            timeout 600 gnubg -t -r -c "rollhint-${rank}.commands" > "rollhint-${rank}.console" 2>&1
+            test -s "rollhint-${rank}.console"
+            grep -q 'Rollout done' "rollhint-${rank}.console"
+            ! grep -Eqi 'Illegal move|Unknown command|No position specified|No game in progress' "rollhint-${rank}.console"
+          done
+      - name: Extract post-rollout hint numeric evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          report=[]
+          for rank in (1,2):
+              text=Path(f'rollhint-{rank}.console').read_text(errors='replace')
+              marker=text.rfind('Rollout done. Printing final results.')
+              if marker < 0: raise SystemExit(f'no rollout completion rank {rank}')
+              tail=text[marker:]
+              Path(f'rollhint-{rank}-post-rollout.txt').write_text(tail)
+              interesting=[ln for ln in tail.splitlines() if re.search(r'(?i)rollout|equity|cubeful|cubeless|double|take|pass|\d+\.\d+',ln)]
+              Path(f'rollhint-{rank}-interesting.txt').write_text('\n'.join(interesting)+'\n')
+              nums=re.findall(r'[+-]?\d+\.\d+', '\n'.join(interesting))
+              report += [
+                  f'RANK_{rank}_POST_ROLLOUT_INTERESTING_LINES: {len(interesting)}',
+                  f'RANK_{rank}_POST_ROLLOUT_NUMBERS: {nums}',
+              ]
+          report += [
+              'FIXED_ORIGINAL_TURN: 0',
+              'ROLLOUT_THEN_HINT: True',
+              'TRIALS_PER_CANDIDATE: 36',
+              'CMARK_USED: False',
+              'DEV_DATA_USED: False',
+              'PRISTINE_DATA_USED: False',
+              'XG_LABELS_USED: False',
+          ]
+          Path('gnu-play-rollout-hint-v26-report.txt').write_text('\n'.join(report)+'\n')
+          print(Path('gnu-play-rollout-hint-v26-report.txt').read_text())
+          PY
+      - name: Publish rollout-hint status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d '{"state":"success","context":"gnu-v26/rollout-hint","description":"played current-position rollout then hint evidence captured"}' >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-play-rollout-hint-v26
+          path: |
+            rollhint-*.commands
+            rollhint-*.console
+            rollhint-*-post-rollout.txt
+            rollhint-*-interesting.txt
+            gnu-play-rollout-hint-v26-report.txt
+          if-no-files-found: ignore
+          retention-days: 14
