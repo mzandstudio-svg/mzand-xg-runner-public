@@ -44,4 +44,4 @@ jobs:
           path: gnu-branch-runs.tsv
           retention-days: 2
 
-# inventory refresh after rollout-hint launch
+# inventory refresh automation-20260811-1720
