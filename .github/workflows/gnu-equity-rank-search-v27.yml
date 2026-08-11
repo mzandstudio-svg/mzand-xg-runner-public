@@ -1,0 +1,185 @@
+name: GNU Afterstate Equity Rank Search v27
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-equity-rank-search-v27.yml
+      - scripts/mzand-afterstate-v27.py
+      - scripts/mzand-engine-v27.py
+      - scripts/test-mzand-engine-v27.py
+      - scripts/train-mzand-gnu-v27.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+env:
+  # Immutable source already used by GNU Verified Evidence Train v18.
+  SOURCE_RUN_ID: '31472166884'
+  MZAND_V27_REQUIRE_ROLLOUT_ROWS: '2'
+  MZAND_V27_FULL_LEGAL_DEV_LIMIT: '512'
+  MZAND_V27_SEARCH_DEV_LIMIT: '96'
+
+jobs:
+  train-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+
+      - name: Download verified GNU-only source corpus
+        uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-prepare
+          path: prep
+          repository: mzandstudio-svg/mzand-xg-runner-public
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Download immutable true GNU rollout exports
+        uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-rollout-13
+          path: rollout13
+          repository: mzandstudio-svg/mzand-xg-runner-public
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Re-verify genuine GNU rollout evidence and rebuild refined corpus
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp prep/gnu-teacher-v15.jsonl .
+          cp prep/gnu-v15-selected.jsonl .
+          cp prep/gnu-v15-shard-reports.txt .
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          selected=[json.loads(x) for x in Path('gnu-v15-selected.jsonl').read_text().splitlines() if x.strip()]
+          byidx={int(r['sourceRowIndex']):r for r in selected}
+          evidence=[]; ok=[]
+          for p in sorted(Path('rollout13').rglob('*.txt')):
+              if not p.stem.isdigit(): continue
+              src=int(p.stem); row=byidx.get(src)
+              if row is None: continue
+              assert row['sourceSplit'] in ('train','tune')
+              assert row.get('pristine') is False
+              assert row.get('xgLabelUsed') is False
+              assert row.get('devUsed') is False
+              pick=int(row['pickedRank'])
+              text=p.read_text(errors='replace')
+              vals={int(rank):float(eq) for rank,eq in re.findall(r'^\s*(\d+)\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',text,re.M)}
+              if 1 not in vals or pick not in vals: continue
+              trials=int(row['effectiveRolloutTrials'])
+              evidence.append({'sourceRowIndex':src,'sourceSplit':row['sourceSplit'],'pickedRank':pick,'trials':trials,'teacherTopEquity':vals[1],'studentPickedEquity':vals[pick]})
+              ok.append(row)
+          if len(evidence)!=2: raise SystemExit(f'expected exactly 2 verified rollout rows, got {len(evidence)}')
+          if sorted(x['trials'] for x in evidence)!=[1296,5184]: raise SystemExit(f'bad rollout trial provenance {evidence}')
+          Path('gnu-v27-rollout-evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
+          Path('gnu-v27-selected-success.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in ok))
+          print(json.dumps(evidence,indent=2))
+          PY
+          GNU_V15_BATCH_IN=gnu-teacher-v15.jsonl \
+          GNU_V15_SELECTED=gnu-v27-selected-success.jsonl \
+          GNU_V15_EVIDENCE=gnu-v27-rollout-evidence.json \
+          GNU_V15_BATCH_OUT=gnu-teacher-v27-refined.jsonl \
+          python scripts/apply-gnu-rollout-refinement-v15.py
+          grep -q '^ROWS_REFINED: 2$' gnu-v15-refinement-report.txt
+          grep -q '^DEV_ROWS_REFINED: 0$' gnu-v15-refinement-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' gnu-v15-refinement-report.txt
+          grep -q '^XG_LABELS_USED: False$' gnu-v15-refinement-report.txt
+
+      - name: Install ML stack
+        run: python -m pip install --disable-pip-version-check -q numpy joblib xgboost
+
+      - name: Validate independent legal move generator
+        run: python scripts/test-mzand-engine-v27.py
+
+      - name: Train afterstate equity evaluator plus pairwise ranker
+        env:
+          GNU_V27_BATCH_OUT: gnu-teacher-v27-refined.jsonl
+        run: python scripts/train-mzand-gnu-v27.py
+
+      - name: Enforce provenance and architecture gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^CLASSIFIER_USED: False$' mzand-gnu-v27-report.txt
+          grep -q '^ROLLOUT_REFINED_ROWS: 2$' mzand-gnu-v27-report.txt
+          grep -q '^DEV_USED_FOR_MODEL_SELECTION: False$' mzand-gnu-v27-report.txt
+          grep -q '^DEV_ROWS_MINED: 0$' mzand-gnu-v27-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' mzand-gnu-v27-report.txt
+          grep -q '^XG_LABELS_USED: False$' mzand-gnu-v27-report.txt
+          cov=$(awk '/^GENERATOR_TEACHER_TOP_COVERAGE:/{print $2}' mzand-gnu-v27-report.txt)
+          python - "$cov" <<'PY'
+          import sys
+          cov=float(sys.argv[1])
+          if cov < 0.99:
+              raise SystemExit(f'legal generator teacher-top coverage too low: {cov}')
+          print('GENERATOR_COVERAGE_GATE',cov)
+          PY
+
+      - name: Self-play rollout code-path smoke on train only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import importlib.util,json,sys
+          from pathlib import Path
+          p=Path('scripts/mzand-engine-v27.py')
+          s=importlib.util.spec_from_file_location('eng_smoke',p); m=importlib.util.module_from_spec(s); sys.modules['eng_smoke']=m; s.loader.exec_module(m)
+          rows=[json.loads(x) for x in Path('gnu-teacher-v27-refined.jsonl').read_text().splitlines() if x.strip()]
+          row=next(r for r in rows if r.get('split')=='train' and len(r.get('hints') or [])>=2)
+          e=m.MZandEngine('mzand-gnu-v27.joblib',beam_width=4)
+          pick=e.choose_fast(row['board'],row['dice'])
+          out=e.rollout_candidate(row['board'],pick.candidate,trials=2,seed=27260811,max_turns=32)
+          assert out['trainingEligible'] is False
+          out['note']='SMOKE_ONLY_NOT_EVIDENCE_NOT_TRAINING_LABEL'
+          Path('mzand-v27-selfplay-smoke.json').write_text(json.dumps(out,indent=2)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+
+      - name: Publish measured sealed-dev status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          t1=$(awk '/^DEV_STRICT_TOP1:/{print $2}' mzand-gnu-v27-report.txt)
+          t2=$(awk '/^DEV_TOP2:/{print $2}' mzand-gnu-v27-report.txt)
+          loss=$(awk '/^DEV_MEAN_EQUITY_LOSS:/{print $2}' mzand-gnu-v27-report.txt)
+          hard=$(awk '/^DEV_HARD_STRICT_TOP1:/{print $2}' mzand-gnu-v27-report.txt)
+          n=$(awk '/^DEV_POSITION_SAMPLES:/{print $2}' mzand-gnu-v27-report.txt)
+          cov=$(awk '/^GENERATOR_TEACHER_TOP_COVERAGE:/{print $2}' mzand-gnu-v27-report.txt)
+          full=$(awk '/^FULL_LEGAL_TOP1_VS_GNU:/{print $2}' mzand-gnu-v27-report.txt)
+          s2=$(awk '/^SEARCH_DEPTH2_TOP1_VS_GNU:/{print $2}' mzand-gnu-v27-report.txt)
+          desc="Top1=$t1 Top2=$t2 loss=$loss hard=$hard n=$n gen=$cov full=$full s2=$s2"
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GATE_SHA" \
+            -d "{\"state\":\"success\",\"context\":\"gnu-v27/afterstate-search\",\"description\":\"$desc\"}" >/dev/null
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-afterstate-equity-rank-search-v27
+          path: |
+            gnu-v27-rollout-evidence.json
+            gnu-v15-refinement-report.txt
+            mzand-gnu-v27.joblib
+            mzand-gnu-v27-report.txt
+            mzand-gnu-v27-report.json
+            mzand-gnu-v27-rollout-queue.jsonl
+            mzand-v27-selfplay-smoke.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+# No XG labels. No pristine data. Self-play rollout smoke is explicitly not training evidence.
