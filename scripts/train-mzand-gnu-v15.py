@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# CI rerun marker: 2026-08-11
 import importlib.util,json,os
 from pathlib import Path
 import joblib
