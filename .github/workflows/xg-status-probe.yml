@@ -1,0 +1,45 @@
+name: XG branch status probe
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-status-probe.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish probe run id
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "{\"state\":\"success\",\"context\":\"xg-status-probe/run-$GITHUB_RUN_ID\",\"description\":\"XG branch run inventory probe\"}" >/dev/null
+      - name: Query recent XG branch runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            "/repos/$GITHUB_REPOSITORY/actions/runs?branch=mzand-xg-public-runner-fix&per_page=40" \
+            --jq '.workflow_runs[] | [.id,.name,.status,.conclusion,.head_sha,.created_at] | @tsv' \
+            | tee xg-branch-runs.tsv
+      - uses: actions/upload-artifact@v7
+        with:
+          name: xg-branch-status-probe
+          path: xg-branch-runs.tsv
+          retention-days: 2
