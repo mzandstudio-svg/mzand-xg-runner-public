@@ -1,0 +1,195 @@
+name: GNU Rollout Recovery v17 Verified Successes
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-rollout-recovery-v17.yml
+      - scripts/apply-gnu-rollout-refinement-v15.py
+      - scripts/train-mzand-gnu-v15.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+env:
+  PREP_RUN_ID: '31472166884'
+
+jobs:
+  rollout:
+    name: GNU v17 tolerant rollout shard ${{ matrix.shard }}
+    strategy:
+      fail-fast: false
+      matrix: { shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15] }
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-prepare
+          path: prep
+          repository: mzandstudio-svg/mzand-xg-runner-public
+          run-id: ${{ env.PREP_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Attempt only genuine GNU marked-move rollouts; quarantine cmark failures
+        env: { ROLLOUT_SHARD: '${{ matrix.shard }}' }
+        shell: bash
+        run: |
+          set -uox pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+          mkdir -p v17-rollouts
+          python - "$ROLLOUT_SHARD" <<'PY'
+          import json,sys
+          from pathlib import Path
+          s=int(sys.argv[1]); rows=[json.loads(x) for x in Path('prep/gnu-v15-selected.jsonl').read_text().splitlines() if x.strip()]
+          Path('v17-rollouts/shard.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in rows if int(r['rolloutShard'])==s))
+          PY
+          : > v17-rollouts/status.tsv
+          i=0
+          while IFS= read -r row; do
+            i=$((i+1))
+            src=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["sourceRowIndex"])' "$row")
+            pos=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["positionId"])' "$row")
+            d1=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["dice"][0])' "$row")
+            d2=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["dice"][1])' "$row")
+            pick=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["pickedRank"])' "$row")
+            trials=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["effectiveRolloutTrials"])' "$row")
+            cat > "v17-rollouts/${src}.commands" <<EOF
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set evaluation chequerplay evaluation plies 3
+          set evaluation cubedecision evaluation plies 3
+          set rollout trials $trials
+          set rollout quasirandom on
+          set rollout seed $((20261700+ROLLOUT_SHARD*100+i*10))
+          set rollout limit enable off
+          set rollout jsd stop off
+          new game
+          set board $pos
+          set dice $d1 $d2
+          clear hint
+          hint 16
+          cmark move set rollout 1 $pick
+          analyse rollout move
+          export position text v17-rollouts/${src}.txt
+          quit
+          EOF
+            rc=0
+            timeout 14400 gnubg -t -r -c "v17-rollouts/${src}.commands" > "v17-rollouts/${src}.console" 2>&1 || rc=$?
+            ok=false
+            if [ "$rc" -eq 0 ] && [ -s "v17-rollouts/${src}.txt" ] && ! grep -Eq 'No moves to analyse|No moves marked' "v17-rollouts/${src}.console"; then
+              if grep -Eq "^[[:space:]]*1\.[[:space:]]+Rollout" "v17-rollouts/${src}.txt" && grep -Eq "^[[:space:]]*${pick}\.[[:space:]]+Rollout" "v17-rollouts/${src}.txt"; then ok=true; fi
+            fi
+            if $ok; then
+              printf '%s\tSUCCESS\t%s\t%s\n' "$src" "$pick" "$trials" >> v17-rollouts/status.tsv
+            else
+              printf '%s\tSKIPPED_CMARK\t%s\t%s\n' "$src" "$pick" "$trials" >> v17-rollouts/status.tsv
+              rm -f "v17-rollouts/${src}.txt"
+            fi
+          done < v17-rollouts/shard.jsonl
+          echo "SHARD=$ROLLOUT_SHARD SUCCESS=$(grep -c $'\tSUCCESS\t' v17-rollouts/status.tsv || true) SKIPPED=$(grep -c $'\tSKIPPED_CMARK\t' v17-rollouts/status.tsv || true)"
+          exit 0
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-v17-rollout-${{ matrix.shard }}
+          path: v17-rollouts/
+          retention-days: 14
+
+  train:
+    needs: rollout
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-prepare
+          path: prep
+          repository: mzandstudio-svg/mzand-xg-runner-public
+          run-id: ${{ env.PREP_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with: { pattern: 'gnu-v17-rollout-*', path: rollouts }
+      - name: Build evidence exclusively from verified Rollout exports
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp prep/gnu-teacher-v15.jsonl .
+          cp prep/gnu-v15-selected.jsonl .
+          cp prep/gnu-v15-shard-reports.txt .
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          selected=[json.loads(x) for x in Path('gnu-v15-selected.jsonl').read_text().splitlines() if x.strip()]
+          byidx={int(r['sourceRowIndex']):r for r in selected}
+          out=[]; selected_ok=[]
+          for p in sorted(Path('rollouts').rglob('*.txt')):
+              if not p.stem.isdigit(): continue
+              src=int(p.stem)
+              row=byidx.get(src)
+              if not row: continue
+              pick=int(row['pickedRank']); text=p.read_text(errors='replace')
+              vals={int(rank):float(eq) for rank,eq in re.findall(r'^\s*(\d+)\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',text,re.M)}
+              if 1 not in vals or pick not in vals: continue
+              out.append({'sourceRowIndex':src,'sourceSplit':row['sourceSplit'],'pickedRank':pick,'trials':int(row['effectiveRolloutTrials']),'teacherTopEquity':vals[1],'studentPickedEquity':vals[pick]})
+              selected_ok.append(row)
+          if len(out)<2: raise SystemExit(f'need >=2 verified genuine rollout rows, got {len(out)}')
+          Path('gnu-v17-rollout-evidence.json').write_text(json.dumps(out,indent=2)+'\n')
+          Path('gnu-v17-selected-success.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in selected_ok))
+          Path('gnu-v17-rollout-summary.txt').write_text('\n'.join([
+              'PIPELINE: GNU_V17_TOLERANT_CMARK',
+              f'ATTEMPTED_SELECTED_ROWS: {len(selected)}',
+              f'VERIFIED_ROLLOUT_ROWS: {len(out)}',
+              f'SKIPPED_OR_UNVERIFIED_ROWS: {len(selected)-len(out)}',
+              'DEV_ROWS_REFINED: 0','PRISTINE_DATA_USED: False','XG_LABELS_USED: False'])+'\n')
+          print(Path('gnu-v17-rollout-summary.txt').read_text())
+          PY
+          GNU_V15_BATCH_IN=gnu-teacher-v15.jsonl GNU_V15_SELECTED=gnu-v17-selected-success.jsonl GNU_V15_EVIDENCE=gnu-v17-rollout-evidence.json GNU_V15_BATCH_OUT=gnu-teacher-v17-refined.jsonl python scripts/apply-gnu-rollout-refinement-v15.py
+      - name: Train candidate and evaluate strictly sealed dev
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check -q numpy scikit-learn joblib xgboost
+          GNU_V15_BATCH_OUT=gnu-teacher-v17-refined.jsonl python scripts/train-mzand-gnu-v15.py
+          grep -q '^DEV_ROWS_REFINED: 0$' gnu-v15-refinement-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' mzand-gnu-v15-report.txt
+          grep -q '^XG_LABELS_USED: False$' mzand-gnu-v15-report.txt
+          grep -q '^DEV_USED_FOR_MODEL_SELECTION: False$' mzand-gnu-v15-report.txt
+      - name: Publish measured sealed-dev evidence
+        env: { GH_TOKEN: '${{ github.token }}' }
+        shell: bash
+        run: |
+          set -euo pipefail
+          top1=$(awk '/^DEV_STRICT_TOP1:/{print $2}' mzand-gnu-v15-report.txt)
+          top2=$(awk '/^DEV_TOP2:/{print $2}' mzand-gnu-v15-report.txt)
+          loss=$(awk '/^DEV_MEAN_EQUITY_LOSS:/{print $2}' mzand-gnu-v15-report.txt)
+          hard=$(awk '/^DEV_HARD_STRICT_TOP1:/{print $2}' mzand-gnu-v15-report.txt)
+          n=$(awk '/^DEV_POSITION_SAMPLES:/{print $2}' mzand-gnu-v15-report.txt)
+          refined=$(awk '/^ROLLOUT_REFINED_ROWS:/{print $2}' mzand-gnu-v15-report.txt)
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-v17/heldout\",\"description\":\"Top1=$top1 Top2=$top2 loss=$loss hard=$hard n=$n refined=$refined\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-rollout-recovery-v17
+          path: |
+            gnu-v17-rollout-summary.txt
+            gnu-v17-rollout-evidence.json
+            gnu-v17-selected-success.jsonl
+            gnu-v15-refinement-report.txt
+            mzand-gnu-v15.joblib
+            mzand-gnu-v15-report.txt
+            mzand-gnu-v15-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+# Uses only genuine GNU Rollout exports from train/tune. Failed cmark rows are skipped, never fabricated or substituted.
