@@ -97,7 +97,7 @@ jobs:
           grep -q '^XG_LABELS_USED: False$' gnu-v15-refinement-report.txt
 
       - name: Install ML stack
-        run: python -m pip install --disable-pip-version-check -q numpy joblib xgboost
+        run: python -m pip install --disable-pip-version-check -q numpy joblib xgboost scikit-learn
 
       - name: Validate independent legal move generator
         run: python scripts/test-mzand-engine-v27.py
