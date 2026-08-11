@@ -1,0 +1,154 @@
+name: GNU Direct Afterstate Orientation v20
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-afterstate-orientation-v20.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  prove-orientation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU Backgammon
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+      - name: Roll out rank1 and rank2 as direct afterstates
+        shell: bash
+        run: |
+          set -euxo pipefail
+          base='mHPMBSDg88TBAA'
+          for rank in 1 2; do
+            cat > "afterstate-${rank}.commands" <<EOF
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set evaluation chequerplay evaluation plies 3
+          set evaluation cubedecision evaluation plies 3
+          set rollout trials 1296
+          set rollout quasirandom on
+          set rollout seed $((20262000+rank))
+          set rollout limit enable off
+          set rollout jsd stop off
+          new game
+          set board $base
+          set dice 5 5
+          hint 16
+          set board =$rank
+          show board
+          rollout
+          quit
+          EOF
+            timeout 1500 gnubg -t -r -c "afterstate-${rank}.commands" > "afterstate-${rank}.console" 2>&1
+            test -s "afterstate-${rank}.console"
+          done
+          cat afterstate-1.console afterstate-2.console > gnu-afterstate-v20-all.txt
+      - name: Parse orientation against independently verified move rollouts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          # Independent reference from prior genuine marked-move rollout export,
+          # sourceRowIndex=3210, train only, 1296 trials:
+          # rank1 = +0.659, rank2 = +0.523 from original mover perspective.
+          reference={1:0.659,2:0.523}
+
+          def numbers(text):
+              patterns=[
+                  r'(?im)^\s*Cubeful\s+equity\s*[:=]\s*([+-]?\d+(?:\.\d+)?)',
+                  r'(?im)^\s*Equity\s*[:=]\s*([+-]?\d+(?:\.\d+)?)',
+                  r'(?im)\bEq\.:\s*([+-]?\d+(?:\.\d+)?)',
+                  r'(?im)\bequity\s+([+-]?\d+(?:\.\d+)?)',
+              ]
+              vals=[]
+              for pat in patterns:
+                  vals.extend(float(x) for x in re.findall(pat,text))
+              return vals
+
+          report=[]
+          selected={}
+          for rank in (1,2):
+              text=Path(f'afterstate-{rank}.console').read_text(errors='replace')
+              vals=numbers(text)
+              report.append(f'RANK_{rank}_PARSED_EQUITY_VALUES: {vals}')
+              if not vals:
+                  raise SystemExit(f'no rollout equity values parsed for rank {rank}')
+
+              # Choose the final parsed equity-like value. We then test both
+              # orientations against the independently verified move rollout.
+              raw=vals[-1]
+              err_same=abs(raw-reference[rank])
+              err_neg=abs((-raw)-reference[rank])
+              orientation='same' if err_same < err_neg else 'negate'
+              mover_eq=raw if orientation=='same' else -raw
+              selected[rank]=(raw,mover_eq,orientation,min(err_same,err_neg))
+              report += [
+                  f'RANK_{rank}_RAW_AFTERSTATE_EQUITY: {raw:+.6f}',
+                  f'RANK_{rank}_REFERENCE_MOVE_EQUITY: {reference[rank]:+.6f}',
+                  f'RANK_{rank}_ORIENTATION: {orientation}',
+                  f'RANK_{rank}_MOVER_EQUITY: {mover_eq:+.6f}',
+                  f'RANK_{rank}_ABS_REFERENCE_ERROR: {min(err_same,err_neg):.6f}',
+              ]
+
+          orientations={x[2] for x in selected.values()}
+          if len(orientations)!=1:
+              raise SystemExit(f'inconsistent afterstate orientation: {selected}')
+          # 1296-rollout stochastic tolerance. The reference and proof use
+          # different seeds, so demand directional agreement, not bit equality.
+          if any(x[3] > 0.12 for x in selected.values()):
+              raise SystemExit(f'afterstate equity too far from verified move rollout: {selected}')
+          if not selected[1][1] > selected[2][1]:
+              raise SystemExit(f'direct afterstate rollout failed known rank1>rank2 ordering: {selected}')
+
+          report += [
+              f'DIRECT_AFTERSTATE_ORIENTATION: {next(iter(orientations))}',
+              'KNOWN_ORDER_PRESERVED: True',
+              'TRIALS_PER_CANDIDATE: 1296',
+              'CMARK_USED: False',
+              'SOURCE_SPLIT: train',
+              'DEV_DATA_USED: False',
+              'PRISTINE_DATA_USED: False',
+              'XG_LABELS_USED: False',
+          ]
+          Path('gnu-afterstate-orientation-v20-report.txt').write_text('\n'.join(report)+'\n')
+          print(Path('gnu-afterstate-orientation-v20-report.txt').read_text())
+          PY
+      - name: Publish proof status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          orientation=$(awk '/^DIRECT_AFTERSTATE_ORIENTATION:/{print $2}' gnu-afterstate-orientation-v20-report.txt)
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d "{\"state\":\"success\",\"context\":\"gnu-v20/afterstate-orientation\",\"description\":\"direct candidate rollout orientation=$orientation; cmark=false\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-afterstate-orientation-v20
+          path: |
+            afterstate-*.commands
+            afterstate-*.console
+            gnu-afterstate-v20-all.txt
+            gnu-afterstate-orientation-v20-report.txt
+          if-no-files-found: ignore
+          retention-days: 14
