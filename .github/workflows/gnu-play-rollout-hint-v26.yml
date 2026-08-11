@@ -56,7 +56,10 @@ jobs:
             timeout 600 gnubg -t -r -c "rollhint-${rank}.commands" > "rollhint-${rank}.console" 2>&1
             test -s "rollhint-${rank}.console"
             grep -q 'Rollout done' "rollhint-${rank}.console"
-            ! grep -Eqi 'Illegal move|Unknown command|No position specified|No game in progress' "rollhint-${rank}.console"
+            if grep -Eqi 'Illegal|unparsable|Unknown command|No position specified|No game in progress|There must be a game in progress' "rollhint-${rank}.console"; then
+              echo "Rejected invalid played-candidate evidence for rank=$rank" >&2
+              exit 1
+            fi
           done
       - name: Extract post-rollout hint numeric evidence
         shell: bash
@@ -68,6 +71,8 @@ jobs:
           report=[]
           for rank in (1,2):
               text=Path(f'rollhint-{rank}.console').read_text(errors='replace')
+              if re.search(r'(?i)illegal|unparsable|unknown command|no position specified|no game in progress', text):
+                  raise SystemExit(f'invalid command evidence rank {rank}')
               marker=text.rfind('Rollout done. Printing final results.')
               if marker < 0: raise SystemExit(f'no rollout completion rank {rank}')
               tail=text[marker:]
