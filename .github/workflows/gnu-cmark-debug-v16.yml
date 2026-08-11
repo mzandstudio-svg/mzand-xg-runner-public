@@ -14,17 +14,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Validate afterstate rollout fallback on a known cmark-failing position
+      - name: Test independent cmark commands on known failing mined position
         shell: bash
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gnubg
-          base='4HPkASGYBzwYVA'
-          d1=2
-          d2=6
-          for rank in 1 2; do
-            cat > "afterstate-${rank}.commands" <<EOF
+          cat > probe.commands <<'EOF'
           set lang C
           set confirm new off
           set confirm save off
@@ -34,57 +30,35 @@ jobs:
           set evaluation cubedecision evaluation plies 3
           set rollout trials 1296
           set rollout quasirandom on
-          set rollout seed $((20261600+rank))
+          set rollout seed 20261621
           set rollout limit enable off
           set rollout jsd stop off
           new game
-          set board $base
-          set dice $d1 $d2
+          set board 4HPkASGYBzwYVA
+          set dice 2 6
           hint 16
-          set board =$rank
-          rollout
+          cmark move set rollout 1
+          cmark move set rollout 2
+          analyse rollout move
+          export position text probe-position.txt
           quit
           EOF
-            timeout 2400 gnubg -t -r -c "afterstate-${rank}.commands" > "afterstate-${rank}.out" 2>&1
-            test -s "afterstate-${rank}.out"
-            ! grep -Eq 'There must be a game in progress|You must set up a board first|No position specified|No moves to analyse' "afterstate-${rank}.out"
-          done
-      - name: Parse fallback equity orientation
-        shell: python
-        run: |
-          import json,re
-          from pathlib import Path
-          teacher={1:-0.2493550330400467,2:-0.25849679112434387}
-          result={}
-          for rank in (1,2):
-              text=Path(f'afterstate-{rank}.out').read_text(errors='replace')
-              vals=[]
-              for line in text.splitlines():
-                  if re.search(r'(?i)equity|cubeful|cubeless',line):
-                      nums=re.findall(r'(?<![A-Za-z0-9])([+-]?\d+\.\d+)',line)
-                      if nums: vals.append((line.strip(),float(nums[-1])))
-              if not vals:
-                  raise SystemExit(f'no rollout equity parsed rank={rank}')
-              raw=vals[-1][1]
-              result[rank]={'raw':raw,'negated':-raw,'source':vals[-1][0]}
-          direct_err=sum(abs(result[r]['raw']-teacher[r]) for r in (1,2))
-          neg_err=sum(abs(result[r]['negated']-teacher[r]) for r in (1,2))
-          orientation='DIRECT' if direct_err < neg_err else 'NEGATE_AFTERSTATE'
-          normalized={r:(result[r]['raw'] if orientation=='DIRECT' else result[r]['negated']) for r in (1,2)}
-          ordering_ok=normalized[1] > normalized[2]
-          evidence={'positionId':'4HPkASGYBzwYVA','dice':[2,6],'trials':1296,'teacherBootstrap':teacher,'afterstate':result,'orientation':orientation,'normalized':normalized,'orderingMatchesBootstrap':ordering_ok,'pristine':False,'xgLabelsUsed':False,'devDataUsed':False}
-          Path('gnu-afterstate-fallback-v16.json').write_text(json.dumps(evidence,indent=2)+'\n')
-          print(json.dumps(evidence,indent=2))
-          if not ordering_ok:
-              raise SystemExit('afterstate normalized rollout reverses bootstrap rank ordering; do not integrate')
+          timeout 2400 gnubg -t -r -c probe.commands > probe.out 2>&1
+          cat probe.out
+          test -s probe-position.txt
+          ! grep -Eq 'No moves to analyse|No moves marked' probe.out
+          grep -q 'Rollout' probe-position.txt
+          grep -E '^[[:space:]]*[12]\. Rollout' probe-position.txt | tee rollout-lines.txt
+          test "$(wc -l < rollout-lines.txt)" -eq 2
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: gnu-afterstate-fallback-v16
+          name: gnu-cmark-independent-v16
           path: |
-            afterstate-*.commands
-            afterstate-*.out
-            gnu-afterstate-fallback-v16.json
+            probe.commands
+            probe.out
+            probe-position.txt
+            rollout-lines.txt
           retention-days: 7
 
-# Validate robust afterstate fallback before replacing brittle cmark in v15.
+# Determine whether cmark must mark ranks in separate commands for arbitrary mined positions.
