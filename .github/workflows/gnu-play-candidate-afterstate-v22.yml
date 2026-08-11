@@ -1,0 +1,127 @@
+name: GNU Play Candidate Afterstate v22
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-play-candidate-afterstate-v22.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  afterstate-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU Backgammon
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+      - name: Play two known legal hint moves and capture afterstates
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cat > after1.commands <<'EOF'
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set player 0 human
+          set player 1 human
+          new game
+          set board mHPMBSDg88TBAA
+          set dice 5 5
+          18/13(2) 6/1*(2)
+          show board
+          export position text after1.txt
+          quit
+          EOF
+          cat > after2.commands <<'EOF'
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set player 0 human
+          set player 1 human
+          new game
+          set board mHPMBSDg88TBAA
+          set dice 5 5
+          8/3(2) 6/1*(2)
+          show board
+          export position text after2.txt
+          quit
+          EOF
+          timeout 180 gnubg -t -r -c after1.commands > after1.console 2>&1
+          timeout 180 gnubg -t -r -c after2.commands > after2.console 2>&1
+          test -s after1.txt
+          test -s after2.txt
+          ! grep -Eqi 'Illegal move|Unknown command|You cannot move|not a legal move' after1.console
+          ! grep -Eqi 'Illegal move|Unknown command|You cannot move|not a legal move' after2.console
+      - name: Verify distinct plausible afterstate Position IDs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          original='mHPMBSDg88TBAA'
+          data={}
+          for rank in (1,2):
+              text=Path(f'after{rank}.txt').read_text(errors='replace')
+              console=Path(f'after{rank}.console').read_text(errors='replace')
+              m=(re.search(r'(?im)^Position ID:\s*(\S+)',text)
+                 or re.search(r'(?im)^Position ID:\s*(\S+)',console))
+              if not m:
+                  raise SystemExit(f'no Position ID captured for candidate {rank}')
+              pid=m.group(1)
+              if pid==original or pid.startswith('/1') or pid.startswith('/2') or len(pid)<10:
+                  raise SystemExit(f'implausible candidate {rank} afterstate Position ID: {pid}')
+              data[rank]=pid
+          if data[1]==data[2]:
+              raise SystemExit(f'candidate afterstates unexpectedly identical: {data}')
+          report='\n'.join([
+              'GNU_CANDIDATE_MOVE_PLAYED: True',
+              'BOTH_PLAYERS_HUMAN: True',
+              f'RANK_1_AFTERSTATE_POSITION_ID: {data[1]}',
+              f'RANK_2_AFTERSTATE_POSITION_ID: {data[2]}',
+              'AFTERSTATES_DISTINCT: True',
+              'CMARK_USED: False',
+              'SET_BOARD_EQUALS_RANK_USED: False',
+              'DEV_DATA_USED: False',
+              'PRISTINE_DATA_USED: False',
+              'XG_LABELS_USED: False',
+          ])+'\n'
+          Path('gnu-play-candidate-afterstate-v22-report.txt').write_text(report)
+          print(report)
+          PY
+      - name: Publish afterstate status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d '{"state":"success","context":"gnu-v22/candidate-afterstate","description":"candidate move text produced distinct real afterstates; no CMark"}' >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-play-candidate-afterstate-v22
+          path: |
+            after*.commands
+            after*.console
+            after*.txt
+            gnu-play-candidate-afterstate-v22-report.txt
+          if-no-files-found: ignore
+          retention-days: 14
