@@ -1,0 +1,210 @@
+name: GNU Scaled Train Tune Distillation v31
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-scale-train-tune-v31.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+env:
+  BASE_RUN_ID: '31472166884'
+  GNU_V6_GAMES: '24'
+  GNU_V6_TURNS: '12'
+  GNU_V6_MAX_HINTS: '16'
+  GNU_V6_SEED_BASE: '731260812'
+  GNU_V6_HARD_MARGIN: '0.03'
+  GNU_V6_ROLLOUT_MARGIN: '0.012'
+
+jobs:
+  label:
+    name: GNU v31 train-tune shard ${{ matrix.shard }}
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        include:
+          - { shard: 0, offset: 2000 }
+          - { shard: 1, offset: 2024 }
+          - { shard: 2, offset: 2048 }
+          - { shard: 3, offset: 2072 }
+          - { shard: 4, offset: 2096 }
+          - { shard: 5, offset: 2120 }
+          - { shard: 6, offset: 2144 }
+          - { shard: 7, offset: 2168 }
+          - { shard: 8, offset: 2192 }
+          - { shard: 9, offset: 2216 }
+          - { shard: 10, offset: 2240 }
+          - { shard: 11, offset: 2264 }
+          - { shard: 12, offset: 2288 }
+          - { shard: 13, offset: 2312 }
+          - { shard: 14, offset: 2336 }
+          - { shard: 15, offset: 2360 }
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Install GNU teacher runtime
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libglib2.0-dev
+          npm init -y
+          npm install --no-audit --no-fund @nodots/backgammon-ai@1.1.2 @nodots/backgammon-core@1.0.0
+      - name: Generate independent non-pristine GNU 3-ply Huge labels
+        shell: bash
+        env:
+          GNU_V6_SHARD_INDEX: ${{ matrix.shard }}
+          GNU_V6_GAME_OFFSET: ${{ matrix.offset }}
+        run: node scripts/gnu-teacher-v6.mjs
+      - name: Keep only train/tune rows and enforce isolation
+        shell: bash
+        env: { SHARD: '${{ matrix.shard }}' }
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          s=os.environ['SHARD']; p=Path(f'gnu-teacher-v6-{s}.jsonl')
+          rows=[json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+          keep=[]
+          for r in rows:
+              assert r.get('pristine') is False
+              assert r.get('xgLabel') is False
+              if r.get('split') in ('train','tune'): keep.append(r)
+          Path(f'gnu-v31-{s}.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in keep))
+          if not keep: raise SystemExit('no train/tune rows retained')
+          print(f'SHARD={s} GENERATED={len(rows)} KEPT={len(keep)} DEV_ADDED=0 PRISTINE=False XG=False')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gnu-v31-shard-${{ matrix.shard }}
+          path: gnu-v31-${{ matrix.shard }}.jsonl
+          retention-days: 30
+
+  train:
+    needs: label
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gnu-v31-shard-*
+          path: newshards
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-prepare
+          path: prep
+          repository: ${{ github.repository }}
+          run-id: ${{ env.BASE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-rollout-13
+          path: rollout13
+          repository: ${{ github.repository }}
+          run-id: ${{ env.BASE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Rebuild verified GNU rollout-refined baseline
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp prep/gnu-teacher-v15.jsonl .
+          cp prep/gnu-v15-selected.jsonl .
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          selected=[json.loads(x) for x in Path('gnu-v15-selected.jsonl').read_text().splitlines() if x.strip()]
+          byidx={int(r['sourceRowIndex']):r for r in selected}; ev=[]; ok=[]
+          for p in sorted(Path('rollout13').rglob('*.txt')):
+              if not p.stem.isdigit(): continue
+              src=int(p.stem); r=byidx.get(src)
+              if r is None: continue
+              assert r['sourceSplit'] in ('train','tune') and r.get('pristine') is False and r.get('xgLabelUsed') is False and r.get('devUsed') is not True
+              pick=int(r['pickedRank']); text=p.read_text(errors='replace')
+              vals={int(rank):float(eq) for rank,eq in re.findall(r'^\s*(\d+)\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',text,re.M)}
+              if 1 in vals and pick in vals:
+                  ev.append({'sourceRowIndex':src,'sourceSplit':r['sourceSplit'],'pickedRank':pick,'trials':int(r['effectiveRolloutTrials']),'teacherTopEquity':vals[1],'studentPickedEquity':vals[pick]}); ok.append(r)
+          if len(ev)!=2: raise SystemExit(f'expected 2 verified rollouts, got {len(ev)}')
+          Path('base-evidence.json').write_text(json.dumps(ev)); Path('base-selected.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in ok))
+          PY
+          GNU_V15_BATCH_IN=gnu-teacher-v15.jsonl GNU_V15_SELECTED=base-selected.jsonl GNU_V15_EVIDENCE=base-evidence.json GNU_V15_BATCH_OUT=gnu-v31-base-refined.jsonl python scripts/apply-gnu-rollout-refinement-v15.py
+      - name: Append large independent train/tune corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base=[json.loads(x) for x in Path('gnu-v31-base-refined.jsonl').read_text().splitlines() if x.strip()]
+          new=[]
+          for p in sorted(Path('newshards').glob('gnu-v31-*.jsonl')):
+              new += [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+          for r in new: assert r.get('split') in ('train','tune') and r.get('pristine') is False and r.get('xgLabel') is False
+          seen={(r.get('positionId'),tuple(r.get('dice') or []),r.get('split')) for r in base}; added=[]
+          for r in new:
+              k=(r.get('positionId'),tuple(r.get('dice') or []),r.get('split'))
+              if k in seen: continue
+              seen.add(k); added.append(r)
+          out=base+added
+          Path('gnu-teacher-v31-scaled.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in out))
+          rep=['CORPUS: GNU_SCALED_TRAIN_TUNE_V31',f'BASE_ROWS: {len(base)}',f'NEW_GENERATED_TRAIN_TUNE_ROWS: {len(new)}',f'NEW_UNIQUE_ROWS_ADDED: {len(added)}',f'FINAL_ROWS: {len(out)}',f'FINAL_TRAIN_ROWS: {sum(r.get("split")=="train" for r in out)}',f'FINAL_TUNE_ROWS: {sum(r.get("split")=="tune" for r in out)}',f'FINAL_DEV_ROWS: {sum(r.get("split")=="dev" for r in out)}','DEV_ROWS_ADDED: 0','PRISTINE_DATA_USED: False','XG_LABELS_USED: False']
+          Path('gnu-v31-corpus-report.txt').write_text('\n'.join(rep)+'\n'); print('\n'.join(rep))
+          if len(added)<30000: raise SystemExit(f'insufficient new unique train/tune expansion: {len(added)}')
+          PY
+      - name: Install ML stack and validate engine
+        run: |
+          python -m pip install --disable-pip-version-check -q numpy joblib xgboost scikit-learn
+          python scripts/test-mzand-engine-v27.py
+      - name: Train scaled afterstate equity plus pairwise ranker
+        env:
+          GNU_V27_BATCH_OUT: gnu-teacher-v31-scaled.jsonl
+          MZAND_V27_REQUIRE_ROLLOUT_ROWS: '2'
+          MZAND_V27_FULL_LEGAL_DEV_LIMIT: '512'
+          MZAND_V27_SEARCH_DEV_LIMIT: '96'
+        run: python scripts/train-mzand-gnu-v27.py
+      - name: Enforce sealed-dev and provenance gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^DEV_USED_FOR_MODEL_SELECTION: False$' mzand-gnu-v27-report.txt
+          grep -q '^DEV_ROWS_MINED: 0$' mzand-gnu-v27-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' mzand-gnu-v27-report.txt
+          grep -q '^XG_LABELS_USED: False$' mzand-gnu-v27-report.txt
+          grep -q '^ROLLOUT_REFINED_ROWS: 2$' mzand-gnu-v27-report.txt
+          cat gnu-v31-corpus-report.txt
+          cat mzand-gnu-v27-report.txt
+      - name: Publish measured held-out result
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail
+          t1=$(awk '/^DEV_STRICT_TOP1:/{print $2}' mzand-gnu-v27-report.txt); t2=$(awk '/^DEV_TOP2:/{print $2}' mzand-gnu-v27-report.txt); loss=$(awk '/^DEV_MEAN_EQUITY_LOSS:/{print $2}' mzand-gnu-v27-report.txt); n=$(awk '/^DEV_POSITION_SAMPLES:/{print $2}' mzand-gnu-v27-report.txt)
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-v31/heldout\",\"description\":\"Top1=$t1 Top2=$t2 loss=$loss n=$n XG=false pristine=false\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-scaled-train-tune-v31
+          path: |
+            gnu-v31-corpus-report.txt
+            mzand-gnu-v27-report.txt
+            mzand-gnu-v27-report.json
+            mzand-gnu-v27.joblib
+            mzand-gnu-v27-rollout-queue.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+
+# v31: only independent non-pristine train/tune GNU labels are added. Sealed dev is unchanged.
+# XG labels and pristine data are forbidden before verified GNU held-out Top-1 >=95%.
