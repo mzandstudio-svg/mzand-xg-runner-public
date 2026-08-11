@@ -1,0 +1,113 @@
+name: GNU Verified Evidence Train v18
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths: [.github/workflows/gnu-verified-evidence-train-v18.yml]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+env:
+  SOURCE_RUN_ID: '31472166884'
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-prepare
+          path: prep
+          repository: mzandstudio-svg/mzand-xg-runner-public
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-rollout-13
+          path: rollout13
+          repository: mzandstudio-svg/mzand-xg-runner-public
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Re-verify immutable genuine GNU rollout exports
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp prep/gnu-teacher-v15.jsonl .
+          cp prep/gnu-v15-selected.jsonl .
+          cp prep/gnu-v15-shard-reports.txt .
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          selected=[json.loads(x) for x in Path('gnu-v15-selected.jsonl').read_text().splitlines() if x.strip()]
+          byidx={int(r['sourceRowIndex']):r for r in selected}
+          out=[]; selected_ok=[]
+          for p in sorted(Path('rollout13').rglob('*.txt')):
+              if not p.stem.isdigit(): continue
+              src=int(p.stem); row=byidx.get(src)
+              if row is None: continue
+              assert row['sourceSplit'] in ('train','tune')
+              assert row.get('pristine') is False
+              assert row.get('xgLabelUsed') is False
+              pick=int(row['pickedRank']); text=p.read_text(errors='replace')
+              vals={int(rank):float(eq) for rank,eq in re.findall(r'^\s*(\d+)\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',text,re.M)}
+              if 1 not in vals or pick not in vals: continue
+              out.append({'sourceRowIndex':src,'sourceSplit':row['sourceSplit'],'pickedRank':pick,'trials':int(row['effectiveRolloutTrials']),'teacherTopEquity':vals[1],'studentPickedEquity':vals[pick]})
+              selected_ok.append(row)
+          if len(out)!=2: raise SystemExit(f'expected exactly 2 previously verified rollout rows, got {len(out)}')
+          trials=sorted(x['trials'] for x in out)
+          if trials != [1296,5184]: raise SystemExit(f'unexpected trial provenance {trials}')
+          Path('gnu-v18-rollout-evidence.json').write_text(json.dumps(out,indent=2)+'\n')
+          Path('gnu-v18-selected-success.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in selected_ok))
+          print(json.dumps(out,indent=2))
+          PY
+          GNU_V15_BATCH_IN=gnu-teacher-v15.jsonl GNU_V15_SELECTED=gnu-v18-selected-success.jsonl GNU_V15_EVIDENCE=gnu-v18-rollout-evidence.json GNU_V15_BATCH_OUT=gnu-teacher-v18-refined.jsonl python scripts/apply-gnu-rollout-refinement-v15.py
+          grep -q '^ROWS_REFINED: 2$' gnu-v15-refinement-report.txt
+          grep -q '^DEV_ROWS_REFINED: 0$' gnu-v15-refinement-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' gnu-v15-refinement-report.txt
+          grep -q '^XG_LABELS_USED: False$' gnu-v15-refinement-report.txt
+      - name: Train and measure sealed non-pristine dev
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check -q numpy scikit-learn joblib xgboost
+          GNU_V15_BATCH_OUT=gnu-teacher-v18-refined.jsonl python scripts/train-mzand-gnu-v15.py
+          grep -q '^ROLLOUT_REFINED_ROWS: 2$' mzand-gnu-v15-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' mzand-gnu-v15-report.txt
+          grep -q '^XG_LABELS_USED: False$' mzand-gnu-v15-report.txt
+          grep -q '^DEV_USED_FOR_MODEL_SELECTION: False$' mzand-gnu-v15-report.txt
+          cat mzand-gnu-v15-report.txt
+      - name: Publish sealed-dev evidence
+        env: { GH_TOKEN: '${{ github.token }}' }
+        shell: bash
+        run: |
+          set -euo pipefail
+          top1=$(awk '/^DEV_STRICT_TOP1:/{print $2}' mzand-gnu-v15-report.txt)
+          top2=$(awk '/^DEV_TOP2:/{print $2}' mzand-gnu-v15-report.txt)
+          loss=$(awk '/^DEV_MEAN_EQUITY_LOSS:/{print $2}' mzand-gnu-v15-report.txt)
+          hard=$(awk '/^DEV_HARD_STRICT_TOP1:/{print $2}' mzand-gnu-v15-report.txt)
+          hn=$(awk '/^DEV_HARD_SAMPLES:/{print $2}' mzand-gnu-v15-report.txt)
+          n=$(awk '/^DEV_POSITION_SAMPLES:/{print $2}' mzand-gnu-v15-report.txt)
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-v18/heldout\",\"description\":\"Top1=$top1 Top2=$top2 loss=$loss hard=$hard hardn=$hn n=$n rollouts=2\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-verified-evidence-train-v18
+          path: |
+            gnu-v18-rollout-evidence.json
+            gnu-v18-selected-success.jsonl
+            gnu-v15-refinement-report.txt
+            mzand-gnu-v15.joblib
+            mzand-gnu-v15-report.txt
+            mzand-gnu-v15-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+# Reuses only CI-verified GNU rollout exports from run 31472166884; no dev/pristine/XG refinement.
