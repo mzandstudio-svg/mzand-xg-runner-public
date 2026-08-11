@@ -1,0 +1,51 @@
+name: GNU cmark debug v16
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths: [.github/workflows/gnu-cmark-debug-v16.yml]
+  workflow_dispatch:
+
+permissions: { contents: read }
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe cmark semantics on known failing non-double position
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+          cat > probe.commands <<'EOF'
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set evaluation chequerplay evaluation plies 3
+          set evaluation cubedecision evaluation plies 3
+          new game
+          set board jOfCAxCwt8EBMA
+          set dice 3 4
+          hint 16
+          help cmark
+          help cmark move
+          help cmark move set
+          cmark move set rollout 1 2
+          hint 16
+          show commands
+          quit
+          EOF
+          timeout 600 gnubg -t -r -c probe.commands > probe.out 2>&1 || true
+          cat probe.out
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gnu-cmark-debug-v16
+          path: |
+            probe.commands
+            probe.out
+          retention-days: 3
