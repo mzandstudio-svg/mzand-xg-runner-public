@@ -44,4 +44,4 @@ jobs:
           path: gnu-branch-runs.tsv
           retention-days: 2
 
-# inventory refresh after afterstate rollout export launch
+# inventory refresh after turn-orientation launch
