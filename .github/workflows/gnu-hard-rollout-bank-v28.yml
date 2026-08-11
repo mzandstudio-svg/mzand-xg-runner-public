@@ -1,0 +1,240 @@
+name: GNU Hard Rollout Bank v28
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-hard-rollout-bank-v28.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+env:
+  SOURCE_RUN_ID: '31509967799'
+  SOURCE_ARTIFACT: 'gnu-afterstate-equity-rank-search-v27'
+  SELECT_COUNT: '16'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.SOURCE_ARTIFACT }}
+          path: v27
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Select highest-loss train/tune disagreements only
+        id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          rows=[json.loads(x) for x in Path('v27/mzand-gnu-v27-rollout-queue.jsonl').read_text().splitlines() if x.strip()]
+          safe=[]
+          for r in rows:
+              if r.get('sourceSplit') not in ('train','tune'): continue
+              if r.get('pristine') is not False: continue
+              if r.get('xgLabelUsed') is not False: continue
+              if r.get('devUsed') is not False: continue
+              if not r.get('trainingEligible'): continue
+              if int(r.get('pickedRank',1)) <= 1: continue
+              if not r.get('positionId') or not r.get('dice'): continue
+              safe.append(r)
+          safe.sort(key=lambda r:(-float(r.get('equityLoss',0.0)),-float(r.get('teacherMargin',0.0)),int(r['sourceRowIndex'])))
+          sel=safe[:int(os.environ['SELECT_COUNT'])]
+          if len(sel)<int(os.environ['SELECT_COUNT']): raise SystemExit(f'need {os.environ["SELECT_COUNT"]} safe rows, got {len(sel)}')
+          matrix=[]
+          for i,r in enumerate(sel):
+              matrix.append({
+                  'slot':i,
+                  'sourceRowIndex':int(r['sourceRowIndex']),
+                  'sourceSplit':r['sourceSplit'],
+                  'positionId':r['positionId'],
+                  'd1':int(r['dice'][0]),
+                  'd2':int(r['dice'][1]),
+                  'pickedRank':int(r['pickedRank']),
+                  'equityLoss':float(r['equityLoss']),
+                  'teacherMargin':float(r['teacherMargin']),
+                  'trials':1296,
+              })
+          Path('gnu-v28-selected.json').write_text(json.dumps(matrix,indent=2)+'\n')
+          Path('gnu-v28-selected.jsonl').write_text(''.join(json.dumps(x,separators=(',',':'))+'\n' for x in matrix))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write('matrix='+json.dumps({'include':matrix},separators=(',',':'))+'\n')
+          print('SELECTED',len(matrix),'TRAIN',sum(x['sourceSplit']=='train' for x in matrix),'TUNE',sum(x['sourceSplit']=='tune' for x in matrix))
+          print('MAX_LOSS',matrix[0]['equityLoss'],'MIN_LOSS',matrix[-1]['equityLoss'])
+          PY
+          cat > gnu-v28-provenance.txt <<EOF
+          CORPUS: GNU_HARD_ROLLOUT_BANK_V28
+          SOURCE: MZAND_V27_TRAIN_TUNE_ROLLOUT_QUEUE
+          SELECTED_ROWS: 16
+          DEV_ROWS_SELECTED: 0
+          PRISTINE_DATA_USED: False
+          XG_LABELS_USED: False
+          TRAINING_ELIGIBLE_SOURCE_ROWS_ONLY: True
+          ROLLOUT_TRIALS_PER_ROW: 1296
+          EOF
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gnu-v28-prepare
+          path: |
+            gnu-v28-selected.json
+            gnu-v28-selected.jsonl
+            gnu-v28-provenance.txt
+          retention-days: 14
+
+  rollout:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    name: GNU v28 rollout ${{ matrix.sourceRowIndex }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU Backgammon
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+      - name: True GNU rollout teacher-top vs MZand pick
+        shell: bash
+        env:
+          SRC: '${{ matrix.sourceRowIndex }}'
+          SPLIT: '${{ matrix.sourceSplit }}'
+          POS: '${{ matrix.positionId }}'
+          D1: '${{ matrix.d1 }}'
+          D2: '${{ matrix.d2 }}'
+          PICK: '${{ matrix.pickedRank }}'
+          TRIALS: '${{ matrix.trials }}'
+          SLOT: '${{ matrix.slot }}'
+          LOSS: '${{ matrix.equityLoss }}'
+          MARGIN: '${{ matrix.teacherMargin }}'
+        run: |
+          set -u
+          mkdir -p out
+          cat > out/commands.txt <<EOF
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set evaluation chequerplay evaluation plies 3
+          set evaluation cubedecision evaluation plies 3
+          set rollout trials $TRIALS
+          set rollout quasirandom on
+          set rollout seed $((28000000+SLOT*101))
+          set rollout limit enable off
+          set rollout jsd stop off
+          new game
+          set board $POS
+          set dice $D1 $D2
+          clear hint
+          hint 16
+          cmark move set rollout 1 $PICK
+          analyse rollout move
+          export position text out/rollout.txt
+          quit
+          EOF
+          rc=0
+          timeout 14400 gnubg -t -r -c out/commands.txt > out/console.txt 2>&1 || rc=$?
+          python - <<'PY'
+          import json,os,re
+          from pathlib import Path
+          src=int(os.environ['SRC']); pick=int(os.environ['PICK']); trials=int(os.environ['TRIALS'])
+          status={'sourceRowIndex':src,'sourceSplit':os.environ['SPLIT'],'pickedRank':pick,'trials':trials,'equityLoss':float(os.environ['LOSS']),'teacherMargin':float(os.environ['MARGIN']),'pristine':False,'xgLabelUsed':False,'devUsed':False}
+          p=Path('out/rollout.txt')
+          text=p.read_text(errors='replace') if p.exists() else ''
+          vals={int(rank):float(eq) for rank,eq in re.findall(r'^\s*(\d+)\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',text,re.M)}
+          status['rolloutRanks']=sorted(vals)
+          status['success']=1 in vals and pick in vals
+          if status['success']:
+              status['teacherTopEquity']=vals[1]
+              status['studentPickedEquity']=vals[pick]
+              status['rolloutEquityGap']=vals[1]-vals[pick]
+          else:
+              status['reason']='missing marked rollout rank(s)'
+          Path('out/status.json').write_text(json.dumps(status,indent=2)+'\n')
+          print(json.dumps(status,indent=2))
+          PY
+          exit 0
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-v28-rollout-${{ matrix.sourceRowIndex }}
+          path: out/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  collect:
+    if: always()
+    needs: [prepare, rollout]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gnu-v28-rollout-*
+          path: bank
+      - name: Validate and publish rollout bank manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          stats=[]
+          for p in sorted(Path('bank').rglob('status.json')):
+              d=json.loads(p.read_text())
+              assert d['sourceSplit'] in ('train','tune')
+              assert d['pristine'] is False
+              assert d['xgLabelUsed'] is False
+              assert d['devUsed'] is False
+              stats.append(d)
+          good=[d for d in stats if d.get('success')]
+          Path('gnu-v28-rollout-bank.jsonl').write_text(''.join(json.dumps(d,separators=(',',':'))+'\n' for d in good))
+          rep=[
+              'BANK: GNU_HARD_ROLLOUT_BANK_V28',
+              f'ATTEMPTED: {len(stats)}',
+              f'VERIFIED_TRUE_ROLLOUTS: {len(good)}',
+              'DEV_ROWS_USED: 0',
+              'PRISTINE_DATA_USED: False',
+              'XG_LABELS_USED: False',
+              'TRAINING_ELIGIBLE: True',
+          ]
+          if good:
+              rep += [f'MAX_ROLLOUT_GAP: {max(d["rolloutEquityGap"] for d in good):.6f}',f'MEAN_ROLLOUT_GAP: {sum(d["rolloutEquityGap"] for d in good)/len(good):.6f}']
+          Path('gnu-v28-rollout-bank-report.txt').write_text('\n'.join(rep)+'\n')
+          print(Path('gnu-v28-rollout-bank-report.txt').read_text())
+          if not good: raise SystemExit('no verified true GNU rollouts collected')
+          PY
+      - name: Publish bank status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(awk '/^VERIFIED_TRUE_ROLLOUTS:/{print $2}' gnu-v28-rollout-bank-report.txt)
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-v28/rollout-bank\",\"description\":\"verified true GNU rollouts=$n dev=0 pristine=false XG=false\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-hard-rollout-bank-v28
+          path: |
+            gnu-v28-rollout-bank.jsonl
+            gnu-v28-rollout-bank-report.txt
+          if-no-files-found: ignore
+          retention-days: 30
