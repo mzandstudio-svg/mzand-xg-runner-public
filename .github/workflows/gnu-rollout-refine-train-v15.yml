@@ -81,7 +81,6 @@ jobs:
           from pathlib import Path
           q=[json.loads(x) for x in Path('gnu-v15-top1-rollout-queue.jsonl').read_text().splitlines() if x.strip()]
           safe=[r for r in q if r.get('sourceSplit') in ('train','tune') and r.get('pristine') is False and r.get('xgLabelUsed') is False and r.get('positionId') and r.get('dice') and int(r.get('pickedRank',1))>1]
-          # Exact student mistakes: rank-2 first, then confident larger-rank misses.
           safe.sort(key=lambda r:(0 if int(r['pickedRank'])==2 else 1,-float(r.get('priority',0))))
           p=safe[:32]
           if len(p)<32: raise SystemExit(f'need 32 safe errors, got {len(p)}')
@@ -115,7 +114,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with: { name: gnu-v15-prepare }
-      - name: Roll out teacher-top and actual student pick
+      - name: Roll out teacher-top and actual student pick together
         env: { ROLLOUT_SHARD: '${{ matrix.shard }}' }
         shell: bash
         run: |
@@ -138,8 +137,7 @@ jobs:
             d2=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["dice"][1])' "$row")
             pick=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["pickedRank"])' "$row")
             trials=$(python -c 'import json,sys;print(json.loads(sys.argv[1])["effectiveRolloutTrials"])' "$row")
-            for rank in 1 "$pick"; do
-              cat > "v15-rollouts/${src}-r${rank}.commands" <<EOF
+            cat > "v15-rollouts/${src}.commands" <<EOF
           set lang C
           set confirm new off
           set confirm save off
@@ -149,7 +147,7 @@ jobs:
           set evaluation cubedecision evaluation plies 3
           set rollout trials $trials
           set rollout quasirandom on
-          set rollout seed $((20261500+ROLLOUT_SHARD*100+i*10+rank))
+          set rollout seed $((20261500+ROLLOUT_SHARD*100+i*10))
           set rollout limit enable off
           set rollout jsd stop off
           new game
@@ -157,14 +155,15 @@ jobs:
           set dice $d1 $d2
           clear hint
           hint 16
-          cmark move set rollout $rank
+          cmark move set rollout 1 $pick
           analyse rollout move
-          export position text v15-rollouts/${src}-r${rank}.txt
+          export position text v15-rollouts/${src}.txt
           quit
           EOF
-              timeout 14400 gnubg -t -r -c "v15-rollouts/${src}-r${rank}.commands" > "v15-rollouts/${src}-r${rank}.console" 2>&1
-              test -s "v15-rollouts/${src}-r${rank}.txt"
-            done
+            timeout 14400 gnubg -t -r -c "v15-rollouts/${src}.commands" > "v15-rollouts/${src}.console" 2>&1
+            test -s "v15-rollouts/${src}.txt"
+            ! grep -Eq 'No moves to analyse|No moves marked' "v15-rollouts/${src}.console"
+            grep -q 'Rollout' "v15-rollouts/${src}.txt"
           done < v15-rollouts/shard.jsonl
       - uses: actions/upload-artifact@v7
         if: always()
@@ -194,13 +193,13 @@ jobs:
           from pathlib import Path
           sel=[json.loads(x) for x in Path('gnu-v15-selected.jsonl').read_text().splitlines() if x.strip()]; out=[]
           for row in sel:
-              src=int(row['sourceRowIndex']); pick=int(row['pickedRank']); vals={}
-              for rank in (1,pick):
-                  hits=list(Path('rollouts').rglob(f'{src}-r{rank}.txt'))
-                  if len(hits)!=1: raise SystemExit(f'rollout file mismatch src={src} r={rank}: {len(hits)}')
-                  ms=re.findall(r'^\s*\d+\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',hits[0].read_text(),re.M)
-                  if not ms: raise SystemExit(f'no rollout equity src={src} r={rank}')
-                  vals[rank]=float(ms[0])
+              src=int(row['sourceRowIndex']); pick=int(row['pickedRank'])
+              hits=list(Path('rollouts').rglob(f'{src}.txt'))
+              if len(hits)!=1: raise SystemExit(f'rollout file mismatch src={src}: {len(hits)}')
+              text=hits[0].read_text()
+              vals={int(rank):float(eq) for rank,eq in re.findall(r'^\s*(\d+)\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',text,re.M)}
+              if 1 not in vals or pick not in vals:
+                  raise SystemExit(f'missing marked rollout equity src={src} pick={pick} found={sorted(vals)}')
               out.append({'sourceRowIndex':src,'sourceSplit':row['sourceSplit'],'pickedRank':pick,'trials':int(row['effectiveRolloutTrials']),'teacherTopEquity':vals[1],'studentPickedEquity':vals[pick]})
           Path('gnu-v15-rollout-evidence.json').write_text(json.dumps(out,indent=2)+'\n')
           PY
@@ -236,4 +235,4 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-# CI trigger: 2026-08-11 start sharded v15 actual-disagreement rollout gate.
+# CI trigger: pair-marked GNU true rollout fix; never uses dev/pristine/XG for refinement.
