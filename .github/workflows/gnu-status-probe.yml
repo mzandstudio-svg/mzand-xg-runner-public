@@ -43,3 +43,5 @@ jobs:
           name: gnu-branch-status-probe
           path: gnu-branch-runs.tsv
           retention-days: 2
+
+# inventory refresh 2026-08-11
