@@ -43,3 +43,5 @@ jobs:
           name: xg-branch-status-probe
           path: xg-branch-runs.tsv
           retention-days: 2
+
+# inventory refresh after v21 launch
