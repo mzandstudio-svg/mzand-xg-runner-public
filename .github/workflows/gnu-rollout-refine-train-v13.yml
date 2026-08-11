@@ -157,3 +157,5 @@ jobs:
             v13-rollouts/
           if-no-files-found: ignore
           retention-days: 14
+
+# CI trigger: rerun the full strictly non-pristine rollout-refined held-out gate.
