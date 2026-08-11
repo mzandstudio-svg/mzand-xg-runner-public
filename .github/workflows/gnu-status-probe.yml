@@ -44,4 +44,4 @@ jobs:
           path: gnu-branch-runs.tsv
           retention-days: 2
 
-# inventory refresh automation-20260811-1720
+# inventory refresh after v19 workflow fix
