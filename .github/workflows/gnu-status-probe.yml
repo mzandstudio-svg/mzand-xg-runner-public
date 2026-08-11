@@ -1,0 +1,32 @@
+name: GNU branch status probe
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-status-probe.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Query recent GNU branch runs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api -H 'Accept: application/vnd.github+json' \
+            "/repos/$GITHUB_REPOSITORY/actions/runs?branch=mzand-v6-gnu-rollout-engine&per_page=30" \
+            --jq '.workflow_runs[] | [.id,.name,.status,.conclusion,.head_sha,.created_at] | @tsv' \
+            | tee gnu-branch-runs.tsv
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gnu-branch-status-probe
+          path: gnu-branch-runs.tsv
+          retention-days: 2
