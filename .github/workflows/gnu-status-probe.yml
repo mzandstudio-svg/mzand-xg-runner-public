@@ -44,4 +44,4 @@ jobs:
           path: gnu-branch-runs.tsv
           retention-days: 2
 
-# inventory refresh after candidate-move afterstate launch
+# inventory refresh after played-afterstate rollout launch
