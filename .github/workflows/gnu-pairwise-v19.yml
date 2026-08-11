@@ -46,8 +46,10 @@ jobs:
         shell: bash
         env:
           GNU_V6_SHARD_INDEX: ${{ matrix.shard }}
-          GNU_V6_GAME_OFFSET: ${{ matrix.shard * 4 }}
-        run: node scripts/gnu-teacher-v6.mjs
+        run: |
+          set -euo pipefail
+          export GNU_V6_GAME_OFFSET=$((GNU_V6_SHARD_INDEX * GNU_V6_GAMES))
+          node scripts/gnu-teacher-v6.mjs
       - name: Enforce shard provenance
         shell: bash
         run: |
