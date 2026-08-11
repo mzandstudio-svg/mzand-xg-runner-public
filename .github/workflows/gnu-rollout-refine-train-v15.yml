@@ -235,3 +235,5 @@ jobs:
             mzand-gnu-v15-report.json
           if-no-files-found: ignore
           retention-days: 14
+
+# CI trigger: 2026-08-11 start sharded v15 actual-disagreement rollout gate.
