@@ -23,8 +23,16 @@ def main():
         raise SystemExit(f'insufficient candidates: {len(candidates)}')
 
     rollout_candidates = [c for c in candidates if c.get('analysis_method') == 'Rollout']
-    if not rollout_candidates:
-        raise SystemExit('no completed rollout candidate provenance found in XG export')
+    non_rollout = [c for c in candidates if c.get('analysis_method') != 'Rollout']
+    if candidates[0].get('analysis_method') != 'Rollout':
+        raise SystemExit(
+            f"top candidate is not completed rollout provenance: {candidates[0].get('analysis_method')}"
+        )
+    if non_rollout:
+        details = ', '.join(
+            f"rank={c.get('rank')} method={c.get('analysis_method')}" for c in non_rollout
+        )
+        raise SystemExit(f'incomplete rollout provenance in exported candidate set: {details}')
 
     data['schema'] = 'mzand.xg.quarantine-label.v1'
     data['quarantine'] = {
@@ -40,6 +48,8 @@ def main():
         'gnu_screening_margin': args.gnu_margin,
         'rollout_candidate_count': len(rollout_candidates),
         'candidate_count': len(candidates),
+        'complete_rollout_provenance': True,
+        'top1_rollout_provenance': True,
     }
 
     args.output.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
@@ -54,6 +64,8 @@ def main():
         f'BEST_EQUITY: {candidates[0].get("equity")}',
         f'BEST_METHOD: {candidates[0].get("analysis_method")}',
         f'GNU_SCREENING_MARGIN: {args.gnu_margin:.6f}',
+        'TOP1_ROLLOUT_PROVENANCE: True',
+        'COMPLETE_ROLLOUT_PROVENANCE: True',
         'QUARANTINED: True',
         'TRAINING_ELIGIBLE: False',
         'SEALED_DEV_USED: False',
