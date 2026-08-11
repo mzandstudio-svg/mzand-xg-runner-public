@@ -44,4 +44,4 @@ jobs:
           path: gnu-branch-runs.tsv
           retention-days: 2
 
-# inventory refresh after v19 workflow fix
+# inventory refresh 2026-08-11 v27 checkpoint
