@@ -70,7 +70,9 @@ jobs:
               assert row['sourceSplit'] in ('train','tune')
               assert row.get('pristine') is False
               assert row.get('xgLabelUsed') is False
-              assert row.get('devUsed') is False
+              # Historical selected-row artifacts predate the optional devUsed field.
+              # Reject only an explicit True; missing/False both mean no dev refinement.
+              assert row.get('devUsed') is not True
               pick=int(row['pickedRank'])
               text=p.read_text(errors='replace')
               vals={int(rank):float(eq) for rank,eq in re.findall(r'^\s*(\d+)\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',text,re.M)}
