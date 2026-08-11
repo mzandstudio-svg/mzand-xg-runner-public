@@ -44,4 +44,4 @@ jobs:
           path: gnu-branch-runs.tsv
           retention-days: 2
 
-# inventory refresh after v19 launch
+# inventory refresh after direct-afterstate proof launch
