@@ -1,0 +1,117 @@
+name: GNU Played Afterstate Rollout Export v24
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-play-afterstate-export-v24.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  rollout-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GNU Backgammon
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gnubg
+      - name: Rollout played afterstates and export analyzed current positions
+        shell: bash
+        run: |
+          set -euxo pipefail
+          moves=('18/13(2) 6/1*(2)' '8/3(2) 6/1*(2)')
+          for idx in 0 1; do
+            rank=$((idx+1)); move="${moves[$idx]}"
+            cat > "afterexport-${rank}.commands" <<EOF
+          set lang C
+          set confirm new off
+          set confirm save off
+          set display off
+          set sound enable off
+          set player 0 human
+          set player 1 human
+          set rollout trials 36
+          set rollout quasirandom on
+          set rollout seed $((20262400+rank))
+          set rollout limit enable off
+          set rollout jsd stop off
+          new game
+          set board mHPMBSDg88TBAA
+          set dice 5 5
+          $move
+          rollout
+          export position text afterexport-${rank}.txt
+          quit
+          EOF
+            timeout 600 gnubg -t -r -c "afterexport-${rank}.commands" > "afterexport-${rank}.console" 2>&1
+            test -s "afterexport-${rank}.txt"
+            grep -q 'Rollout done' "afterexport-${rank}.console"
+            ! grep -Eqi 'Illegal move|Unknown command|No position specified|No game in progress' "afterexport-${rank}.console"
+          done
+      - name: Inspect exported rollout provenance and numeric fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          out=[]
+          ids={}
+          for rank in (1,2):
+              text=Path(f'afterexport-{rank}.txt').read_text(errors='replace')
+              m=re.search(r'(?im)^\s*GNU Backgammon\s+Position ID:\s*(\S+)',text)
+              if not m: raise SystemExit(f'missing position id rank {rank}')
+              ids[rank]=m.group(1)
+              lines=[ln for ln in text.splitlines() if re.search(r'(?i)rollout|equity|cubeful|cubeless|no double|double|take|pass|games',ln)]
+              Path(f'afterexport-{rank}-analysis-lines.txt').write_text('\n'.join(lines)+'\n')
+              nums=re.findall(r'[+-]?\d+\.\d+', '\n'.join(lines))
+              out += [
+                  f'RANK_{rank}_POSITION_ID: {ids[rank]}',
+                  f'RANK_{rank}_ANALYSIS_LINES: {len(lines)}',
+                  f'RANK_{rank}_NUMERIC_TOKENS: {nums}',
+              ]
+          if ids[1]==ids[2]: raise SystemExit('afterstate IDs identical')
+          out += [
+              'CURRENT_POSITION_ROLLOUT_EXECUTED: True',
+              'POSITION_EXPORT_AFTER_ROLLOUT: True',
+              'TRIALS_PER_CANDIDATE: 36',
+              'CMARK_USED: False',
+              'DEV_DATA_USED: False',
+              'PRISTINE_DATA_USED: False',
+              'XG_LABELS_USED: False',
+          ]
+          Path('gnu-play-afterstate-export-v24-report.txt').write_text('\n'.join(out)+'\n')
+          print(Path('gnu-play-afterstate-export-v24-report.txt').read_text())
+          PY
+      - name: Publish export status
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -d '{"state":"success","context":"gnu-v24/afterstate-export","description":"played afterstate rollout exported for numeric/provenance inspection"}' >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-play-afterstate-export-v24
+          path: |
+            afterexport-*.commands
+            afterexport-*.console
+            afterexport-*.txt
+            afterexport-*-analysis-lines.txt
+            gnu-play-afterstate-export-v24-report.txt
+          if-no-files-found: ignore
+          retention-days: 14
