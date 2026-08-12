@@ -44,4 +44,4 @@ jobs:
           path: gnu-branch-runs.tsv
           retention-days: 2
 
-# inventory refresh 2026-08-12 automation-v31-6b
+# inventory refresh 2026-08-12 automation-v31-6c
