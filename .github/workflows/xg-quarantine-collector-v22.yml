@@ -17,17 +17,17 @@ permissions:
   statuses: write
 
 env:
-  XGQ_TARGET: '1'
-  XGQ_GAMES: '3'
-  XGQ_TURNS: '8'
+  XGQ_TARGET: '4'
+  XGQ_GAMES: '8'
+  XGQ_TURNS: '10'
   XGQ_SEED_BASE: '930260811'
   XGQ_MAX_HINTS: '8'
 
 jobs:
   generate:
-    name: Generate independent non-pristine q0001
+    name: Generate four independent non-pristine rollout candidates
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
@@ -43,7 +43,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends build-essential pkg-config libglib2.0-dev
           npm init -y
           npm install --no-audit --no-fund @nodots/backgammon-ai@1.1.2 @nodots/backgammon-core@1.0.0
-      - name: Generate quarantined pilot pool
+      - name: Generate quarantined rollout pool
         shell: bash
         run: node scripts/generate-xg-quarantine-pool-v20.mjs
       - name: Enforce raw-position quarantine provenance
@@ -62,7 +62,7 @@ jobs:
         run: echo "matrix=$(cat xg-quarantine-v20-matrix.json)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
-          name: xg-quarantine-v22-pilot-pool
+          name: xg-quarantine-v22-rollout-pool
           path: |
             xg-quarantine-v20-pool.json
             xg-quarantine-v20-matrix.json
@@ -74,7 +74,7 @@ jobs:
     needs: generate
     strategy:
       fail-fast: false
-      max-parallel: 1
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.generate.outputs.matrix) }}
     runs-on: windows-latest
     timeout-minutes: 75
