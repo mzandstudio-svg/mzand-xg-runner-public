@@ -28,5 +28,13 @@ source = source.replaceAll('v24', 'v25').replaceAll('V24', 'V25');
 if (!source.includes("backgame_like:24")) throw new Error('v25 backgame quota patch missing');
 if (!source.includes("anchors>=2||deep>=2")) throw new Error('v25 backgame classifier patch missing');
 
-const encoded = Buffer.from(source, 'utf8').toString('base64');
-await import(`data:text/javascript;base64,${encoded}`);
+// Execute from a real file next to the v24 source so package and relative imports
+// keep normal Node ESM resolution semantics. A data: URL cannot resolve bare
+// package specifiers such as @nodots/backgammon-core.
+const generatedPath = new URL('./.generate-xg-quarantine-backgame-v25.generated.mjs', import.meta.url);
+fs.writeFileSync(generatedPath, source, 'utf8');
+try {
+  await import(generatedPath.href);
+} finally {
+  fs.rmSync(generatedPath, { force: true });
+}
