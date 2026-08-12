@@ -12,17 +12,17 @@ permissions:
   contents: read
 
 env:
-  XGQ_TARGET: '16'
-  XGQ_GAMES: '8'
-  XGQ_TURNS: '10'
+  XGQ_TARGET: '64'
+  XGQ_GAMES: '24'
+  XGQ_TURNS: '24'
   XGQ_SEED_BASE: '930260811'
   XGQ_MAX_HINTS: '8'
 
 jobs:
   build-bank:
-    name: Build 16-position independent non-pristine quarantine bank
+    name: Build 64-position independent non-pristine quarantine bank
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -60,7 +60,7 @@ jobs:
           src=Path('xg-quarantine-v20-pool.json')
           d=json.loads(src.read_text(encoding='utf-8'))
           pos=d['positions']
-          assert len(pos) >= 16, len(pos)
+          assert len(pos) >= 64, len(pos)
           seen=set()
           phase_counts=Counter()
           margin_counts=Counter()
