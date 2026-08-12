@@ -1,0 +1,181 @@
+name: XG Quarantine Rollout Collector v27 Bar Recovery
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-quarantine-collector-v27-bar-recovery.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  statuses: write
+
+env:
+  XGQ_TARGET: '128'
+  XGQ_GAMES: '72'
+  XGQ_TURNS: '72'
+  XGQ_SEED_BASE: '932100071'
+  XGQ_MAX_HINTS: '8'
+  XGQ_ID_OFFSET: '384'
+
+jobs:
+  generate:
+    name: Select independent non-forced bar position for q0021
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      xgid: ${{ steps.pick.outputs.xgid }}
+      seed: ${{ steps.pick.outputs.seed }}
+      gnu_margin: ${{ steps.pick.outputs.gnu_margin }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Install GNU screening prerequisites
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config libglib2.0-dev
+          npm init -y
+          npm install --no-audit --no-fund @nodots/backgammon-ai@1.1.2 @nodots/backgammon-core@1.0.0
+      - name: Regenerate independent phase-diverse quarantine bank
+        shell: bash
+        run: node scripts/generate-xg-quarantine-diverse-v24.mjs
+      - name: Pick low-margin bar position without own checker on bar
+        id: pick
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const p=JSON.parse(fs.readFileSync('xg-quarantine-v24-pool.json','utf8'));
+          const xs=p.positions
+            .filter(x=>x.phaseBucket==='bar' && Number(x.board?.barOwn||0)===0 && Number(x.board?.barOpp||0)>0)
+            .sort((a,b)=>a.gnuScreening.margin-b.gnuScreening.margin);
+          if(!xs.length) throw new Error('no bar position with barOwn=0 and barOpp>0 available');
+          const x=xs[0];
+          x.id='q0021';
+          x.seedRange='XGQ_932100071_V27_BAR_RECOVERY';
+          fs.writeFileSync('xg-quarantine-v27-q0021-source.json',JSON.stringify({schema:'mzand.xg.quarantine-rollout-source.v27',split:'xg_quarantine',quarantined:true,training_eligible:false,pristine:false,sealed_dev:false,xg_labels_used_for_training:false,source_phase:'bar',selection_constraint:'barOwn=0,barOpp>0',position:x},null,2)+'\n');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,`xgid=${x.xgid}\nseed=${x.seed}\ngnu_margin=${Number(x.gnuScreening.margin.toFixed(6))}\n`);
+          NODE
+      - name: Enforce source isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^SPLIT: xg_quarantine$' xg-quarantine-v24-report.txt
+          grep -q '^TRAINING_ELIGIBLE: False$' xg-quarantine-v24-report.txt
+          grep -q '^SEALED_DEV_USED: False$' xg-quarantine-v24-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' xg-quarantine-v24-report.txt
+          grep -q '^XG_LABELS_USED_FOR_TRAINING: False$' xg-quarantine-v24-report.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: xg-quarantine-v27-q0021-source
+          path: |
+            xg-quarantine-v27-q0021-source.json
+            xg-quarantine-v24-report.txt
+          retention-days: 90
+
+  rollout:
+    name: XG fresh 1296 verified v27 q0021 bar recovery
+    needs: generate
+    runs-on: windows-latest
+    timeout-minutes: 75
+    env:
+      XGQ_ID: q0021
+      XGID_INPUT: ${{ needs.generate.outputs.xgid }}
+      XGQ_SEED: ${{ needs.generate.outputs.seed }}
+      XGQ_GNU_MARGIN: ${{ needs.generate.outputs.gnu_margin }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+      - name: Load generated non-pristine XGID
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & ./scripts/xg-reach-dynamic-xgid-v20.ps1
+      - name: Run completion-safe top-five 1296 rollout
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          & ./scripts/xg-top5-rollout-v21-export.ps1
+      - name: Parse and validate fresh rollout into quarantine only
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $raw='xg-quarantine-q0021-parsed.json'
+          $final='xg-quarantine-q0021-label.json'
+          python ./scripts/parse_xg_position_export_v21.py ./xg-top5-v21-export.txt $raw
+          if($LASTEXITCODE -ne 0){throw "XG export parser failed with exit code $LASTEXITCODE"}
+          python ./scripts/quarantine-xg-label-v20.py $raw $final --expected-xgid "$env:XGID_INPUT" --id q0021 --seed "$env:XGQ_SEED" --gnu-margin "$env:XGQ_GNU_MARGIN"
+          if($LASTEXITCODE -ne 0){throw "XG quarantine validator failed with exit code $LASTEXITCODE"}
+          $d=Get-Content $final -Raw|ConvertFrom-Json; $q=$d.quarantine
+          if(-not $q.quarantined -or $q.training_eligible -or $q.pristine -or $q.sealed_dev -or $q.xg_labels_used_for_training -or -not $q.complete_rollout_provenance){throw 'quarantine/provenance gate failed'}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: xg-quarantine-v27-q0021
+          path: |
+            xg-quarantine-q0021-label.json
+            xg-quarantine-q0021-label.report.txt
+            xg-quarantine-q0021-parsed.json
+            xg-top5-v21-export.txt
+            xg-top5-v11-report.txt
+            xg-reach-dynamic-v20-report.txt
+            xg-install.log
+          if-no-files-found: ignore
+          retention-days: 90
+
+  manifest:
+    name: Build verified v27 bar recovery manifest
+    if: always()
+    needs: [generate, rollout]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: xg-quarantine-v27-q0021
+          path: collected
+      - name: Build strict quarantine manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          files=sorted(Path('collected').rglob('xg-quarantine-q0021-label.json')); labels=[]
+          for p in files:
+              d=json.loads(p.read_text()); q=d.get('quarantine') or {}
+              assert q.get('quarantined') is True and q.get('training_eligible') is False
+              assert q.get('pristine') is False and q.get('sealed_dev') is False
+              assert q.get('xg_labels_used_for_training') is False and q.get('complete_rollout_provenance') is True
+              labels.append(d)
+          manifest={'schema_version':'mzand-xg-quarantine-v27-bar-recovery','split':'xg_quarantine','quarantined':True,'training_eligible':False,'pristine':False,'sealed_dev':False,'xg_labels_used_for_training':False,'source_phase':'bar','positions':1,'verified_fresh_rollout_labels':len(labels)}
+          Path('xg-quarantine-v27-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+          Path('xg-quarantine-v27-manifest.txt').write_text('\n'.join(['CORPUS: XG_QUARANTINE_V27_BAR_RECOVERY',f'VERIFIED_FRESH_ROLLOUT_LABELS: {len(labels)}','SOURCE_PHASE: bar','QUARANTINED: True','TRAINING_ELIGIBLE: False','SEALED_DEV_USED: False','PRISTINE_DATA_USED: False','XG_LABELS_USED_FOR_TRAINING: False'])+'\n')
+          print(Path('xg-quarantine-v27-manifest.txt').read_text())
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: xg-quarantine-v27-manifest
+          path: |
+            xg-quarantine-v27-manifest.json
+            xg-quarantine-v27-manifest.txt
+          retention-days: 90
