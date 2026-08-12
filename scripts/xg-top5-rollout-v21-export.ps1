@@ -73,4 +73,4 @@ $patched=$patched.Replace("Post 'xg-top5-v11/rollout-started'","Post 'xg-top5-v2
 $tmp=Join-Path $env:RUNNER_TEMP 'xg-top5-v21-generated.ps1'
 Set-Content $tmp $patched -Encoding UTF8
 & $tmp
-if($LASTEXITCODE -ne 0){throw "Generated XG v21 runner failed with exit code $LASTEXITCODE"}
+if(-not $?){throw 'Generated XG v21 runner failed'}
