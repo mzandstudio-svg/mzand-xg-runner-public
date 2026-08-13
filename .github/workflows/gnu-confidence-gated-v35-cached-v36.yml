@@ -1,0 +1,228 @@
+name: GNU v35 Cached Execution v36
+
+on:
+  push:
+    branches: [mzand-v6-gnu-rollout-engine]
+    paths:
+      - .github/workflows/gnu-confidence-gated-v35-cached-v36.yml
+      - scripts/run-mzand-gnu-v35-cached-v36.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  statuses: write
+
+env:
+  BASE_RUN_ID: '31472166884'
+  V31_RUN_ID: '31540081816'
+  V33_RUN_ID: '31561338583'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - name: Download frozen v31 non-pristine train-tune shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gnu-v31-shard-*
+          path: v31shards
+          merge-multiple: true
+          repository: ${{ github.repository }}
+          run-id: ${{ env.V31_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Download original sealed split baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-prepare
+          path: prep
+          repository: ${{ github.repository }}
+          run-id: ${{ env.BASE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Download verified true GNU rollout evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: gnu-v15-rollout-13
+          path: rollout13
+          repository: ${{ github.repository }}
+          run-id: ${{ env.BASE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Reconstruct exact frozen v35 corpus with zero new dev labels
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cp prep/gnu-teacher-v15.jsonl .
+          cp prep/gnu-v15-selected.jsonl .
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          selected=[json.loads(x) for x in Path('gnu-v15-selected.jsonl').read_text().splitlines() if x.strip()]
+          byidx={int(r['sourceRowIndex']):r for r in selected}; ev=[]; ok=[]
+          for p in sorted(Path('rollout13').rglob('*.txt')):
+              if not p.stem.isdigit(): continue
+              src=int(p.stem); r=byidx.get(src)
+              if r is None: continue
+              assert r['sourceSplit'] in ('train','tune') and r.get('pristine') is False and r.get('xgLabelUsed') is False and r.get('devUsed') is not True
+              pick=int(r['pickedRank']); text=p.read_text(errors='replace')
+              vals={int(rank):float(eq) for rank,eq in re.findall(r'^\s*(\d+)\.\s+Rollout\s+.+?Eq\.:\s+([+-]?\d+\.\d+)',text,re.M)}
+              if 1 in vals and pick in vals:
+                  ev.append({'sourceRowIndex':src,'sourceSplit':r['sourceSplit'],'pickedRank':pick,'trials':int(r['effectiveRolloutTrials']),'teacherTopEquity':vals[1],'studentPickedEquity':vals[pick]}); ok.append(r)
+          if len(ev)!=2: raise SystemExit(f'expected 2 verified rollouts, got {len(ev)}')
+          Path('base-evidence.json').write_text(json.dumps(ev)); Path('base-selected.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in ok))
+          PY
+          GNU_V15_BATCH_IN=gnu-teacher-v15.jsonl GNU_V15_SELECTED=base-selected.jsonl GNU_V15_EVIDENCE=base-evidence.json GNU_V15_BATCH_OUT=base-refined.jsonl python scripts/apply-gnu-rollout-refinement-v15.py
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base=[json.loads(x) for x in Path('base-refined.jsonl').read_text().splitlines() if x.strip()]
+          new=[]
+          for p in sorted(Path('v31shards').glob('gnu-v31-*.jsonl')):
+              new += [json.loads(x) for x in p.read_text().splitlines() if x.strip()]
+          for r in new:
+              assert r.get('split') in ('train','tune') and r.get('pristine') is False and r.get('xgLabel') is False
+          seen={(r.get('positionId'),tuple(r.get('dice') or []),r.get('split')) for r in base}; added=[]
+          for r in new:
+              k=(r.get('positionId'),tuple(r.get('dice') or []),r.get('split'))
+              if k not in seen: seen.add(k); added.append(r)
+          out=base+added
+          Path('gnu-teacher-v35-scaled.jsonl').write_text(''.join(json.dumps(r,separators=(',',':'))+'\n' for r in out))
+          Path('gnu-v35-cached-v36-corpus-report.txt').write_text('\n'.join([
+              'CORPUS: GNU_V35_FROZEN_V31',
+              'EXECUTION: CACHED_V36',
+              f'FINAL_ROWS: {len(out)}',
+              'NEW_DEV_ROWS_ADDED: 0',
+              'PRISTINE_DATA_USED: False',
+              'XG_LABELS_USED: False'])+'\n')
+          if len(added)<50000: raise SystemExit(f'v31 reconstruction unexpectedly small: {len(added)}')
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gnu-v35-cached-v36-frozen-corpus
+          path: |
+            gnu-teacher-v35-scaled.jsonl
+            gnu-v35-cached-v36-corpus-report.txt
+          retention-days: 7
+
+  select:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v35-cached-v36-frozen-corpus
+          path: .
+      - name: Download verified v33 base model
+        uses: actions/download-artifact@v4
+        with:
+          name: gnu-phase-experts-v33
+          path: v33
+          repository: ${{ github.repository }}
+          run-id: ${{ env.V33_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Install ML stack
+        run: python -m pip install --disable-pip-version-check -q numpy joblib xgboost scikit-learn
+      - name: Cached exact v35 train residual and freeze beta/gate on tune only
+        env:
+          GNU_V35_STAGE: select
+          GNU_V35_BATCH_OUT: gnu-teacher-v35-scaled.jsonl
+          GNU_V35_V33_MODEL: v33/mzand-gnu-v33-phase-experts.joblib
+        run: python scripts/run-mzand-gnu-v35-cached-v36.py
+      - name: Enforce selection isolation and cache equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^STAGE: SELECT_TRAIN_TUNE_ONLY$' mzand-gnu-v35-selection-report.txt
+          grep -q '^DEV_OPENED: False$' mzand-gnu-v35-selection-report.txt
+          grep -q '^DEV_USED_FOR_MODEL_SELECTION: False$' mzand-gnu-v35-selection-report.txt
+          grep -q '^DEV_ROWS_MINED: 0$' mzand-gnu-v35-selection-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' mzand-gnu-v35-selection-report.txt
+          grep -q '^XG_LABELS_USED: False$' mzand-gnu-v35-selection-report.txt
+          grep -q '^CACHE_ONLY_OPTIMIZATION: True$' mzand-gnu-v35-cached-v36-execution-report.txt
+          grep -q '^TUNE_CACHE_EQUIVALENCE_ROWS: 8$' mzand-gnu-v35-cached-v36-execution-report.txt
+          cat mzand-gnu-v35-selection-report.txt
+          cat mzand-gnu-v35-cached-v36-execution-report.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gnu-v35-cached-v36-frozen-selection
+          path: |
+            mzand-gnu-v35-selection.json
+            mzand-gnu-v35-selection-report.txt
+            mzand-gnu-v35-cached-v36-execution-report.txt
+          retention-days: 7
+
+  final:
+    needs: [prepare, select]
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v35-cached-v36-frozen-corpus
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          name: gnu-v35-cached-v36-frozen-selection
+          path: .
+      - name: Download verified v33 base model
+        uses: actions/download-artifact@v4
+        with:
+          name: gnu-phase-experts-v33
+          path: v33
+          repository: ${{ github.repository }}
+          run-id: ${{ env.V33_RUN_ID }}
+          github-token: ${{ github.token }}
+      - name: Install ML stack
+        run: python -m pip install --disable-pip-version-check -q numpy joblib xgboost scikit-learn
+      - name: Cached exact v35 refit on train+tune and open sealed dev once
+        env:
+          GNU_V35_STAGE: final
+          GNU_V35_BATCH_OUT: gnu-teacher-v35-scaled.jsonl
+          GNU_V35_V33_MODEL: v33/mzand-gnu-v33-phase-experts.joblib
+          GNU_V35_SELECTION: mzand-gnu-v35-selection.json
+        run: python scripts/run-mzand-gnu-v35-cached-v36.py
+      - name: Enforce sealed-dev provenance and cache equivalence
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^DEV_USED_FOR_MODEL_SELECTION: False$' mzand-gnu-v35-confidence-gated-report.txt
+          grep -q '^DEV_ROWS_MINED: 0$' mzand-gnu-v35-confidence-gated-report.txt
+          grep -q '^PRISTINE_DATA_USED: False$' mzand-gnu-v35-confidence-gated-report.txt
+          grep -q '^XG_LABELS_USED: False$' mzand-gnu-v35-confidence-gated-report.txt
+          grep -q '^NEW_DEV_ROWS_ADDED: 0$' gnu-v35-cached-v36-corpus-report.txt
+          grep -q '^CACHE_ONLY_OPTIMIZATION: True$' mzand-gnu-v35-cached-v36-execution-report.txt
+          grep -q '^DEV_CACHE_EQUIVALENCE_ROWS: 8$' mzand-gnu-v35-cached-v36-execution-report.txt
+          cat gnu-v35-cached-v36-corpus-report.txt
+          cat mzand-gnu-v35-confidence-gated-report.txt
+          cat mzand-gnu-v35-cached-v36-execution-report.txt
+      - name: Publish measured held-out result
+        shell: bash
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail
+          t1=$(awk '/^DEV_STRICT_TOP1:/{print $2}' mzand-gnu-v35-confidence-gated-report.txt); t2=$(awk '/^DEV_TOP2:/{print $2}' mzand-gnu-v35-confidence-gated-report.txt); loss=$(awk '/^DEV_MEAN_EQUITY_LOSS:/{print $2}' mzand-gnu-v35-confidence-gated-report.txt); hard=$(awk '/^DEV_HARD_STRICT_TOP1:/{print $2}' mzand-gnu-v35-confidence-gated-report.txt); n=$(awk '/^DEV_POSITION_SAMPLES:/{print $2}' mzand-gnu-v35-confidence-gated-report.txt)
+          curl -fsS -X POST -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28' "https://api.github.com/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" -d "{\"state\":\"success\",\"context\":\"gnu-v35-cached-v36/heldout\",\"description\":\"Top1=$t1 Top2=$t2 loss=$loss hard=$hard n=$n XG=false pristine=false\"}" >/dev/null
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gnu-confidence-gated-v35-cached-v36
+          path: |
+            gnu-v35-cached-v36-corpus-report.txt
+            mzand-gnu-v35-selection.json
+            mzand-gnu-v35-selection-report.txt
+            mzand-gnu-v35-cached-v36-execution-report.txt
+            mzand-gnu-v35-confidence-gated-report.txt
+            mzand-gnu-v35-confidence-gated-report.json
+            mzand-gnu-v35-confidence-gated.joblib
+          if-no-files-found: ignore
+          retention-days: 30
