@@ -1,0 +1,9 @@
+[
+  {"case_id":"C00_START","xgid":"XGID=-b----E-C---eE---c-e----B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B50_TWO_DEEP_ANCHORS","xgid":"XGID=------E-C---cC-cc-cc--B-B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B51_THREE_DEEP_ANCHORS","xgid":"XGID=------C-C---cC-cc-cc-B-BB-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B52_OUTSIDE_8","xgid":"XGID=------G--B--cB-cc-cc-B--B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B53_OUTSIDE_9","xgid":"XGID=------FA-B--cB-cc-cc-B--B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B54_BURIED_HEAVY","xgid":"XGID=-FC---A-----cA-cc-cc--B-B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"REAL_XG2_BACKGAME_POW112","xgid":"XGID=--bbBdBBCBBA----A--cbb----:0:0:1:00:0:0:0:3:10"}
+]
