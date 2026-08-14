@@ -1,0 +1,7 @@
+[
+  {"case_id":"B50_TWO_DEEP_ANCHORS","group":"nn-dispatch","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=------E-C---cC-cc-cc--B-B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B51_THREE_DEEP_ANCHORS","group":"nn-dispatch","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=------C-C---cC-cc-cc-B-BB-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B52_OUTSIDE_8","group":"nn-dispatch","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=------G--B--cB-cc-cc-B--B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B53_OUTSIDE_9","group":"nn-dispatch","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=------FA-B--cB-cc-cc-B--B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"B54_BURIED_HEAVY","group":"nn-dispatch","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-FC---A-----cA-cc-cc--B-B-:0:0:1:00:0:0:3:0:10"}
+]
