@@ -1,0 +1,86 @@
+name: XG NN Dispatch Probe V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-nn-dispatch-probe-v1.yml
+      - tools/xg-nn-dispatch-probe-v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw 'Installed XG executable missing'}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "XG_EXE_SHA256=$((Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant())" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Capture five direct-NN dispatch probes at 1-ply
+        id: capture
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-nn-dispatch-out'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-nn-dispatch-probe-v1\CAPTURE_XG_NN_DISPATCH.ps1" `
+            -ExePath $env:XG_EXE `
+            -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-nn-dispatch-probe-v1\cases.json" `
+            -OutDir $out
+
+      - name: Summarize raw capture
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-nn-dispatch-out'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $status=Join-Path $out 'capture-status.jsonl'
+          $rows=if(Test-Path $status){@(Get-Content $status).Count}else{0}
+          $raw=if(Test-Path (Join-Path $out 'raw')){@(Get-ChildItem (Join-Path $out 'raw') -Filter '*.txt').Count}else{0}
+          $onePly=0
+          if(Test-Path (Join-Path $out 'raw')){
+            foreach($f in Get-ChildItem (Join-Path $out 'raw') -Filter '*.txt'){
+              $t=Get-Content $f.FullName -Raw
+              if($t -match '(?i)1[- ]ply'){$onePly++}
+            }
+          }
+          @(
+            'XG_NN_DISPATCH_PROBE_V1',
+            "XG_EXE_SHA256=$env:XG_EXE_SHA256",
+            'CASES_REQUESTED=5',
+            "STATUS_ROWS=$rows",
+            "RAW_EXPORTS=$raw",
+            "EXPORTS_MENTIONING_1PLY=$onePly",
+            "CAPTURE_OUTCOME=${{ steps.capture.outcome }}",
+            'TRAINING_ELIGIBLE=False',
+            'PURPOSE=runtime NN dispatch differential probe only'
+          ) | Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
+          Get-Content (Join-Path $out 'RUN_REPORT.txt')
+
+      - name: Upload dispatch evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-nn-dispatch-probe-v1
+          path: |
+            xg-nn-dispatch-out/**
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
