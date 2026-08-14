@@ -1,0 +1,52 @@
+name: XG Installed Assets Inventory V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-assets-inventory-v1.yml
+      - tools/xg-assets-inventory/INVENTORY_XG_ASSETS.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $installerSha=(Get-FileHash $i -Algorithm SHA256).Hash.ToLowerInvariant()
+          "INSTALLER_SHA256=$installerSha" | Out-File $env:GITHUB_ENV -Append
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "XG_EXE=$e" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Inventory engine-relevant installed assets
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-assets-inventory-out'
+          & "$env:GITHUB_WORKSPACE\tools\xg-assets-inventory\INVENTORY_XG_ASSETS.ps1" -ExePath $env:XG_EXE -OutDir $out
+          "installer_sha256=$env:INSTALLER_SHA256" | Out-File (Join-Path $out 'installer-sha256.txt') -Encoding utf8
+          Get-Content (Join-Path $out 'executable-version.txt')
+          Get-Content (Join-Path $out 'met-metadata.tsv')
+
+      - name: Upload inventory evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-assets-inventory-v1
+          path: xg-assets-inventory-out/**
+          if-no-files-found: error
+          retention-days: 14
