@@ -1,0 +1,82 @@
+name: MZand Padded Input Engine V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/mzand-padded-input-engine-v1.yml
+      - tools/mzand-padded-input-engine-v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-package:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/mzand-padded-input-engine-v1/GENERATE_PACKAGE.py
+          chmod +x MZAND_PADDED_INPUT_ENGINE_V1/BUILD_MAC.command
+
+      - name: Build universal macOS binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd MZAND_PADDED_INPUT_ENGINE_V1
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES='arm64;x86_64'
+          cmake --build build --config Release -j 4
+          ctest --test-dir build --output-on-failure
+          for n in 252 254 256 258; do
+            ./build/mzand_eval_${n} 12345 | tee run_${n}.txt
+            grep -q 'bitwise_output_parity=true' run_${n}.txt
+            lipo -info ./build/mzand_eval_${n} | tee -a run_${n}.txt
+          done
+
+      - name: Assemble final research ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd MZAND_PADDED_INPUT_ENGINE_V1
+          mkdir -p bin
+          cp build/mzand_eval_252 build/mzand_eval_254 build/mzand_eval_256 build/mzand_eval_258 bin/
+          cp build/mzand_padded_parity_tests bin/
+          cat > VALIDATION_REPORT.txt <<'EOF'
+          MZand Padded Input Engine V1
+          ============================
+          Active legacy inputs: 250
+          Declared variants: 252 / 254 / 256 / 258
+          Reserved policy: STRICT_ZERO
+          Reserved slots: 2 / 4 / 6 / 8
+          Legacy accumulation path: unchanged 250 inputs
+          Parity test: 1000 deterministic vectors per variant
+          Required comparison: bitwise equality
+          Production strength claim: none
+          Purpose: research dimensional scaffolding with unchanged legacy output
+          EOF
+          for n in 252 254 256 258; do
+            echo >> VALIDATION_REPORT.txt
+            echo "--- variant ${n} ---" >> VALIDATION_REPORT.txt
+            cat run_${n}.txt >> VALIDATION_REPORT.txt
+          done
+          rm -rf build
+          cd ..
+          ditto -c -k --sequesterRsrc --keepParent MZAND_PADDED_INPUT_ENGINE_V1 MZAND_PADDED_INPUT_ENGINE_V1.zip
+          shasum -a 256 MZAND_PADDED_INPUT_ENGINE_V1.zip > MZAND_PADDED_INPUT_ENGINE_V1.zip.sha256
+          cat MZAND_PADDED_INPUT_ENGINE_V1.zip.sha256
+
+      - name: Upload final package
+        uses: actions/upload-artifact@v7
+        with:
+          name: MZAND_PADDED_INPUT_ENGINE_V1
+          path: |
+            MZAND_PADDED_INPUT_ENGINE_V1.zip
+            MZAND_PADDED_INPUT_ENGINE_V1.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
