@@ -26,7 +26,7 @@ jobs:
           $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
           $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
           if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
-          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe';if(-not(Test-Path$e)){throw 'XG exe missing'}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe';if(-not (Test-Path $e)){throw 'XG exe missing'}
           "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append
           "XG_EXE_SHA256=$((Get-FileHash $e -Algorithm SHA256).Hash.ToLowerInvariant())"|Out-File $env:GITHUB_ENV -Append
       - name: Capture verified imports and direct-NN analysis
@@ -42,7 +42,7 @@ jobs:
         run: |
           $out=Join-Path $env:GITHUB_WORKSPACE 'xg-nn-dispatch-v2-out';$p=Join-Path $out 'capture-status.jsonl'
           $rows=0;$verified=0;$analysis=0;$one=0
-          if(Test-Path$p){foreach($line in Get-Content$p){try{$r=$line|ConvertFrom-Json;$rows++;if($r.import_verified){$verified++};if($r.analysis_found){$analysis++};if($r.mentions_1ply){$one++}}catch{}}}
+          if(Test-Path $p){foreach($line in Get-Content $p){try{$r=$line|ConvertFrom-Json;$rows++;if($r.import_verified){$verified++};if($r.analysis_found){$analysis++};if($r.mentions_1ply){$one++}}catch{}}}
           @('XG_NN_DISPATCH_PROBE_V2',"XG_EXE_SHA256=$env:XG_EXE_SHA256","ROWS=$rows","IMPORT_VERIFIED=$verified","ANALYSIS_FOUND=$analysis","MENTIONS_1PLY=$one","CAPTURE_OUTCOME=${{ steps.capture.outcome }}",'TRAINING_ELIGIBLE=False')|Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
           Get-Content (Join-Path $out 'RUN_REPORT.txt')
       - name: Upload evidence
