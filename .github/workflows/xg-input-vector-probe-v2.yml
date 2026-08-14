@@ -1,0 +1,58 @@
+name: XG Input Vector Probe V2
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-input-vector-probe-v2.yml
+      - tools/xg-runtime-probe/PROBE_XG_INPUT_VECTOR.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven standard-board XGID position
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-analyze-win32-v3.ps1
+
+      - name: Probe exact C00 200-base vector before and during Analyze Position
+        shell: powershell
+        run: ./tools/xg-runtime-probe/PROBE_XG_INPUT_VECTOR.ps1
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-input-vector-probe-v2
+          path: |
+            xg-input-probe-v2/**
+            xg-public-v3-report.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        shell: powershell
+        run: Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
