@@ -1,0 +1,100 @@
+name: Zand XG Cube Match Parity V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/zand-xg-cube-parity-v1.yml
+      - tools/zand-xg-cube-parity-v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cube-match-parity-oracle:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw 'Installed XG executable missing'}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          $h=(Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "XG_EXE_SHA256=$h" | Out-File $env:GITHUB_ENV -Append
+          "EXE=$exe`nSHA256=$h" | Out-File "$env:GITHUB_WORKSPACE\xg-runtime-identity.txt"
+
+      - name: Capture 24 XG cube and match oracle cases
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=Join-Path $env:GITHUB_WORKSPACE 'zand-xg-cube-parity-out'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\CAPTURE_XG_CUBE_BATCH.ps1" `
+            -ExePath $env:XG_EXE `
+            -CasesPath "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\cases.json" `
+            -OutDir $out
+
+      - name: Parse XG exports into oracle JSON and CSV
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\PARSE_XG_CUBE_EXPORTS.py" `
+            --cases "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\cases.json" `
+            --raw-dir "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out\raw" `
+            --out-dir "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out"
+
+      - name: Validate batch structure
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=Join-Path $env:GITHUB_WORKSPACE 'zand-xg-cube-parity-out'
+          $status=Get-Content (Join-Path $out 'capture-status.jsonl')
+          $oracle=Get-Content (Join-Path $out 'xg-oracle.jsonl')
+          if($status.Count-ne24){throw "capture-status row count=$($status.Count), expected 24"}
+          if($oracle.Count-ne24){throw "oracle row count=$($oracle.Count), expected 24"}
+          $capture=Get-Content (Join-Path $out 'capture-summary.json') -Raw | ConvertFrom-Json
+          $parsed=Get-Content (Join-Path $out 'oracle-summary.json') -Raw | ConvertFrom-Json
+          @(
+            'ZAND_XG_CUBE_MATCH_PARITY_V1'
+            "XG_EXE_SHA256=$env:XG_EXE_SHA256"
+            "CASES_REQUESTED=$($capture.requested)"
+            "CUBE_ANALYSIS_FOUND=$($capture.cube_analysis_found)"
+            "PARSE_COMPLETE=$($parsed.parse_complete)"
+            'TRAINING_ELIGIBLE=False'
+            'PURPOSE=runtime differential parity only'
+          ) | Out-File (Join-Path $out 'PARITY_RUN_REPORT.txt') -Encoding utf8
+          Get-Content (Join-Path $out 'PARITY_RUN_REPORT.txt')
+
+      - name: Copy local comparator into artifact
+        shell: powershell
+        run: |
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\COMPARE_ZAND_LOCAL.py" "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out\COMPARE_ZAND_LOCAL.py"
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\README.md" "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out\README.md"
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\cases.json" "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out\cases.json"
+
+      - name: Upload parity oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: zand-xg-cube-parity-v1
+          path: |
+            zand-xg-cube-parity-out/**
+            xg-runtime-identity.txt
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
