@@ -27,16 +27,9 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 public static class D2N {
- [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left,Top,Right,Bottom; }
- [DllImport("user32.dll")] public static extern IntPtr GetMenu(IntPtr hWnd);
- [DllImport("user32.dll")] public static extern IntPtr GetSubMenu(IntPtr hMenu,int nPos);
- [DllImport("user32.dll")] public static extern bool GetMenuItemRect(IntPtr hWnd,IntPtr hMenu,uint uItem,out RECT r);
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
- [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
- [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);
 }
 "@
-function ClickXY([int]$x,[int]$y){[D2N]::SetCursorPos($x,$y)|Out-Null;Start-Sleep -Milliseconds 100;[D2N]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 60;[D2N]::mouse_event(4,0,0,0,[UIntPtr]::Zero)}
 function Shot([string]$p){try{$b=[System.Windows.Forms.SystemInformation]::VirtualScreen;$bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height;$g=[System.Drawing.Graphics]::FromImage($bmp);$g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size);$bmp.Save($p,[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bmp.Dispose()}catch{}}
 function SaveDialog(){
  $root=[System.Windows.Automation.AutomationElement]::RootElement
@@ -75,38 +68,35 @@ function ImportVerified([string]$target){
  if($got -ne $target){throw "XGID_VERIFY_MISMATCH target=[$target] got=[$got]"}
  return $got
 }
-function AnalyzePosition(){
+function InvokeOnePly(){
+ # XG2 Help documents Ctrl+1 as the explicit 1-ply Evaluation action.
  FocusXg
- $hwnd=[IntPtr]$xg.MainWindowHandle;$menu=[D2N]::GetMenu($hwnd)
- $top=New-Object D2N+RECT;if(-not [D2N]::GetMenuItemRect($hwnd,$menu,4,[ref]$top)){throw 'Analyze top rect failed'}
- ClickXY ([int](($top.Left+$top.Right)/2)) ([int](($top.Top+$top.Bottom)/2));Start-Sleep -Milliseconds 350
- $sub=[D2N]::GetSubMenu($menu,4);$pos=New-Object D2N+RECT;if(-not [D2N]::GetMenuItemRect($hwnd,$sub,1,[ref]$pos)){throw 'Analyze Position rect failed'}
- ClickXY ([int](($pos.Left+$pos.Right)/2)) ([int](($pos.Top+$pos.Bottom)/2))
+ [System.Windows.Forms.SendKeys]::SendWait('^1')
 }
 function ExportFull(){FocusXg;[System.Windows.Forms.SendKeys]::SendWait('^c');Start-Sleep -Milliseconds 700;return [string](Get-Clipboard -Raw)}
-function HasAnalysis([string]$t){return ($t -match '(?i)Player\s*Winning Chances:|Cubeful Equities|Best Cube action:|(?m)^\s*1\.\s+')}
+function HasAnalysis([string]$t){return ($t -match '(?i)1[- ]ply|Player\s*Winning Chances:|Cubeful Equities|Best Cube action:|(?m)^\s*1\.\s+')}
 
-$settings='HKCU:\Software\GameSite 2000\eXtreme Gammon 2\Settings'
-New-Item -Path $settings -Force|Out-Null
-New-ItemProperty -Path $settings -Name BotAnalyzeLevel -PropertyType DWord -Value 0 -Force|Out-Null
-New-ItemProperty -Path $settings -Name TopAnalyzeLevel -PropertyType DWord -Value 0 -Force|Out-Null
-@('REQUESTED_LEVEL=0','BotAnalyzeLevel='+(Get-ItemPropertyValue -Path $settings -Name BotAnalyzeLevel),'TopAnalyzeLevel='+(Get-ItemPropertyValue -Path $settings -Name TopAnalyzeLevel))|Out-File (Join-Path $env:D2_OUT 'analyze-level-registry.txt') -Encoding utf8
+# Do not infer 1-ply from a preset index. The runtime command itself is Ctrl+1.
+@('DIRECT_NN_COMMAND=Ctrl+1','XGID_VERIFY_COMMAND=Ctrl+Shift+C','POSITION_EXPORT_COMMAND=Ctrl+C')|Out-File (Join-Path $env:D2_OUT 'probe-contract.txt') -Encoding utf8
+
+# Restart after the proven startup so every case begins from a stable configured XG profile.
 Get-Process eXtremeGammon2 -ErrorAction SilentlyContinue|Stop-Process -Force
 Start-Sleep 2
 $xg=Start-Process $env:xgexe -WorkingDirectory (Split-Path -Parent $env:xgexe) -PassThru
 Start-Sleep 6
 $xg.Refresh()
-if($xg.HasExited){throw 'XG exited after settings restart'}
+if($xg.HasExited){throw 'XG exited after restart'}
 
 $cases=Get-Content $env:D2_CASES -Raw|ConvertFrom-Json
 $status=Join-Path $env:D2_OUT 'capture-status.jsonl';if(Test-Path $status){Remove-Item $status -Force}
 foreach($c in $cases){
- $s=Get-Date;$row=[ordered]@{case_id=[string]$c.case_id;xgid=[string]$c.xgid;import_verified=$false;verified_xgid='';analysis_found=$false;mentions_1ply=$false;export_length=0;elapsed_seconds=0;error=''}
+ $s=Get-Date;$row=[ordered]@{case_id=[string]$c.case_id;xgid=[string]$c.xgid;import_verified=$false;verified_xgid='';one_ply_command_sent=$false;analysis_found=$false;mentions_1ply=$false;export_length=0;elapsed_seconds=0;error=''}
  try{
    $got=ImportVerified ([string]$c.xgid);$row.import_verified=$true;$row.verified_xgid=$got
-   AnalyzePosition;Start-Sleep 1
-   if(DismissSave 2){AnalyzePosition}
-   $text='';$deadline=(Get-Date).AddSeconds(18)
+   InvokeOnePly;$row.one_ply_command_sent=$true
+   Start-Sleep 2
+   if(DismissSave 2){InvokeOnePly}
+   $text='';$deadline=(Get-Date).AddSeconds(20)
    while((Get-Date) -lt $deadline -and -not (HasAnalysis $text)){
      Start-Sleep 2;$candidate=ExportFull;if($candidate.Length -gt $text.Length){$text=$candidate}
    }
