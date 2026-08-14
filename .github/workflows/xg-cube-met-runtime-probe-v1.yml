@@ -37,6 +37,7 @@ jobs:
           $out=Join-Path $env:GITHUB_WORKSPACE 'xg-cube-met-probe-out'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           if(-not $env:RUNNER_TEMP){$env:RUNNER_TEMP=$out}
+          $env:xgexe=$env:XG_EXE
           & "$env:GITHUB_WORKSPACE\tools\xg-cube-met-probe\CAPTURE_CUBE_MET.ps1" -ExePath $env:XG_EXE -OutDir $out
 
       - name: Upload probe evidence
