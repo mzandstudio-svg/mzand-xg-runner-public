@@ -1,0 +1,46 @@
+name: XG Runtime Unpacked Image Probe V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-runtime-unpack-probe-v1.yml
+      - tools/xg-runtime-probe/CAPTURE_XG_RUNTIME.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "XG_EXE=$e" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Capture unpacked runtime image
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & "$env:GITHUB_WORKSPACE\tools\xg-runtime-probe\CAPTURE_XG_RUNTIME.ps1" -ExePath $env:XG_EXE -OutDir "$env:GITHUB_WORKSPACE\xg-runtime-probe-out"
+
+      - name: Upload runtime probe
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-runtime-unpacked-probe-v1
+          path: xg-runtime-probe-out/**
+          if-no-files-found: error
+          retention-days: 14
