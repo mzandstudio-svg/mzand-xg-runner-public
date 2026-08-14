@@ -1,0 +1,80 @@
+name: XG Input Vector Probe V3
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-input-vector-probe-v3.yml
+      - tools/xg-runtime-probe/PROBE_XG_INPUT_VECTOR_FAST.ps1
+      - .github/workflows/xg-analyze-level-public-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe-live-c00:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven XGID and keep XG alive
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $yaml=Get-Content "$env:GITHUB_WORKSPACE\.github\workflows\xg-analyze-level-public-v1.yml" -Raw
+          $m=[regex]::Match($yaml,'(?ms)^      - name: Run proven startup and capture Analyze Level\r?\n        shell: powershell\r?\n        run: \|\r?\n(?<script>.*?)(?=^      - name: Upload evidence)')
+          if(-not $m.Success){throw 'Could not extract proven startup block'}
+          $script=$m.Groups['script'].Value -replace '(?m)^          ',''
+          $script=$script.Replace('xg-public-v1-report.txt','xg-input-v3-startup-report.txt')
+          $marker="'XGID_POSITION_READY: True'|Out-File `$report -Append"
+          $idx=$script.IndexOf($marker,[System.StringComparison]::Ordinal)
+          if($idx-lt0){throw 'XGID_POSITION_READY marker missing'}
+          $prefix=$script.Substring(0,$idx+$marker.Length)
+          $ps1=Join-Path $env:RUNNER_TEMP 'xg-input-v3-startup.ps1'
+          Set-Content $ps1 $prefix -Encoding UTF8
+          & $ps1
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+          $xg.Refresh()
+          if($xg.HasExited){throw 'XG exited after startup frontier'}
+          if($xg.MainWindowTitle-notlike '*Position.xgp*'){throw "Position not ready: $($xg.MainWindowTitle)"}
+          "LIVE_XG_PID=$($xg.Id)"
+          "LIVE_XG_TITLE=$($xg.MainWindowTitle)"
+
+      - name: Scan C00 neural input vector in live process
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          & "$env:GITHUB_WORKSPACE\tools\xg-runtime-probe\PROBE_XG_INPUT_VECTOR_FAST.ps1"
+
+      - name: Upload v3 evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-input-vector-probe-v3
+          path: |
+            xg-input-probe-v3/**
+            xg-input-v3-startup-report.txt
+            xg-*.png
+            xg-*-ui.txt
+            xg-*-processes.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        shell: powershell
+        run: Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
