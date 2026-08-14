@@ -1,0 +1,55 @@
+name: MZand Padded Input Engine Source V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/mzand-padded-input-engine-source-v1.yml
+      - tools/mzand-padded-input-engine-v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate package
+        run: |
+          set -euo pipefail
+          python3 tools/mzand-padded-input-engine-v1/GENERATE_PACKAGE.py
+          chmod +x MZAND_PADDED_INPUT_ENGINE_V1/BUILD_MAC.command
+      - name: Build and validate
+        run: |
+          set -euo pipefail
+          cd MZAND_PADDED_INPUT_ENGINE_V1
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j 4
+          ctest --test-dir build --output-on-failure
+          for n in 252 254 256 258; do
+            ./build/mzand_eval_${n} 12345 | tee run_${n}.txt
+            grep -q 'bitwise_output_parity=true' run_${n}.txt
+          done
+          ./build/mzand_padded_parity_tests | tee parity.txt
+          grep -q '252=1 254=1 256=1 258=1' parity.txt
+          mkdir -p bin-linux
+          cp build/mzand_eval_252 build/mzand_eval_254 build/mzand_eval_256 build/mzand_eval_258 build/mzand_padded_parity_tests bin-linux/
+          rm -rf build
+      - name: Package ZIP
+        run: |
+          set -euo pipefail
+          zip -qr MZAND_PADDED_INPUT_ENGINE_V1_SOURCE.zip MZAND_PADDED_INPUT_ENGINE_V1
+          sha256sum MZAND_PADDED_INPUT_ENGINE_V1_SOURCE.zip > MZAND_PADDED_INPUT_ENGINE_V1_SOURCE.zip.sha256
+          cat MZAND_PADDED_INPUT_ENGINE_V1_SOURCE.zip.sha256
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: MZAND_PADDED_INPUT_ENGINE_V1_SOURCE
+          path: |
+            MZAND_PADDED_INPUT_ENGINE_V1_SOURCE.zip
+            MZAND_PADDED_INPUT_ENGINE_V1_SOURCE.zip.sha256
+          retention-days: 14
+          if-no-files-found: error
