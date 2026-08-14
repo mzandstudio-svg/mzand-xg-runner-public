@@ -1,0 +1,59 @@
+name: XG NN Dispatch Boundary 8 vs 9 V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-nn-dispatch-boundary-v1.yml
+      - tools/xg-nn-dispatch-boundary-v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not (Test-Path $e)){throw 'XG exe missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append
+          "XG_EXE_SHA256=$((Get-FileHash $e -Algorithm SHA256).Hash.ToLowerInvariant())"|Out-File $env:GITHUB_ENV -Append
+      - name: Capture exact verified 8-vs-9 direct NN pair
+        id: capture
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'boundary-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-nn-dispatch-probe-v2\CAPTURE_XG_NN_DISPATCH_V2.ps1" -ExePath $env:XG_EXE -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-nn-dispatch-boundary-v1\cases.json" -OutDir $out
+      - name: Report
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'boundary-out';$p=Join-Path $out 'capture-status.jsonl'
+          $rows=0;$verified=0;$analysis=0;$one=0
+          if(Test-Path $p){foreach($line in Get-Content $p){$r=$line|ConvertFrom-Json;$rows++;if($r.import_verified){$verified++};if($r.analysis_found){$analysis++};if($r.mentions_1ply){$one++}}}
+          @('XG_NN_DISPATCH_BOUNDARY_8_9_V1',"XG_EXE_SHA256=$env:XG_EXE_SHA256","ROWS=$rows","IMPORT_VERIFIED=$verified","ANALYSIS_FOUND=$analysis","MENTIONS_1PLY=$one","CAPTURE_OUTCOME=${{ steps.capture.outcome }}")|Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
+          Get-Content (Join-Path $out 'RUN_REPORT.txt')
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-nn-dispatch-boundary-v1
+          path: |
+            boundary-out/**
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
