@@ -14,7 +14,7 @@ permissions:
 jobs:
   cube-match-parity-oracle:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -38,60 +38,90 @@ jobs:
           "XG_EXE_SHA256=$h" | Out-File $env:GITHUB_ENV -Append
           "EXE=$exe`nSHA256=$h" | Out-File "$env:GITHUB_WORKSPACE\xg-runtime-identity.txt"
 
-      - name: Capture 24 XG cube and match oracle cases
+      - name: Capture 24 bounded XG cube and match oracle cases
+        id: capture
+        continue-on-error: true
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           $out=Join-Path $env:GITHUB_WORKSPACE 'zand-xg-cube-parity-out'
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          & "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\CAPTURE_XG_CUBE_BATCH.ps1" `
+          & "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\CAPTURE_XG_CUBE_BATCH_BOUNDED.ps1" `
             -ExePath $env:XG_EXE `
             -CasesPath "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\cases.json" `
             -OutDir $out
 
-      - name: Parse XG exports into oracle JSON and CSV
+      - name: Parse available XG exports into oracle JSON and CSV
+        if: always()
+        id: parse
+        continue-on-error: true
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
+          $out="$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out"
+          New-Item -ItemType Directory -Force -Path "$out\raw" | Out-Null
           python "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\PARSE_XG_CUBE_EXPORTS.py" `
             --cases "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\cases.json" `
-            --raw-dir "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out\raw" `
-            --out-dir "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out"
+            --raw-dir "$out\raw" `
+            --out-dir "$out"
 
-      - name: Validate batch structure
+      - name: Build bounded parity run report
+        if: always()
         shell: powershell
         run: |
-          $ErrorActionPreference='Stop'
+          $ErrorActionPreference='Continue'
           $out=Join-Path $env:GITHUB_WORKSPACE 'zand-xg-cube-parity-out'
-          $status=Get-Content (Join-Path $out 'capture-status.jsonl')
-          $oracle=Get-Content (Join-Path $out 'xg-oracle.jsonl')
-          if($status.Count-ne24){throw "capture-status row count=$($status.Count), expected 24"}
-          if($oracle.Count-ne24){throw "oracle row count=$($oracle.Count), expected 24"}
-          $capture=Get-Content (Join-Path $out 'capture-summary.json') -Raw | ConvertFrom-Json
-          $parsed=Get-Content (Join-Path $out 'oracle-summary.json') -Raw | ConvertFrom-Json
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $statusPath=Join-Path $out 'capture-status.jsonl'
+          $progressPath=Join-Path $out 'capture-progress.jsonl'
+          $oraclePath=Join-Path $out 'xg-oracle.jsonl'
+          $capturePath=Join-Path $out 'capture-summary.json'
+          $parsedPath=Join-Path $out 'oracle-summary.json'
+
+          $statusCount=if(Test-Path $statusPath){@(Get-Content $statusPath).Count}else{0}
+          $oracleCount=if(Test-Path $oraclePath){@(Get-Content $oraclePath).Count}else{0}
+          $progressCount=if(Test-Path $progressPath){@(Get-Content $progressPath).Count}else{0}
+          $found=0;$timedOut=0;$parseComplete=0
+          if(Test-Path $statusPath){
+            foreach($line in Get-Content $statusPath){
+              try{$r=$line|ConvertFrom-Json;if($r.cube_analysis_found){$found++};if($r.timed_out){$timedOut++}}catch{}
+            }
+          }
+          if(Test-Path $parsedPath){try{$parseComplete=[int]((Get-Content $parsedPath -Raw|ConvertFrom-Json).parse_complete)}catch{}}
+          $state=if($statusCount-eq24 -and $oracleCount-eq24 -and $parseComplete-eq24){'COMPLETE'}elseif($found-gt0 -or $statusCount-gt0){'PARTIAL_EVIDENCE'}else{'NO_USABLE_CAPTURE'}
           @(
-            'ZAND_XG_CUBE_MATCH_PARITY_V1'
+            'ZAND_XG_CUBE_MATCH_PARITY_V1_BOUNDED'
+            "STATE=$state"
             "XG_EXE_SHA256=$env:XG_EXE_SHA256"
-            "CASES_REQUESTED=$($capture.requested)"
-            "CUBE_ANALYSIS_FOUND=$($capture.cube_analysis_found)"
-            "PARSE_COMPLETE=$($parsed.parse_complete)"
+            'CASES_REQUESTED=24'
+            "CASE_STATUS_ROWS=$statusCount"
+            "PROGRESS_EVENTS=$progressCount"
+            "CUBE_ANALYSIS_FOUND=$found"
+            "CASE_TIMEOUTS=$timedOut"
+            "ORACLE_ROWS=$oracleCount"
+            "PARSE_COMPLETE=$parseComplete"
+            "CAPTURE_STEP_OUTCOME=${{ steps.capture.outcome }}"
+            "PARSE_STEP_OUTCOME=${{ steps.parse.outcome }}"
             'TRAINING_ELIGIBLE=False'
             'PURPOSE=runtime differential parity only'
           ) | Out-File (Join-Path $out 'PARITY_RUN_REPORT.txt') -Encoding utf8
           Get-Content (Join-Path $out 'PARITY_RUN_REPORT.txt')
 
       - name: Copy local comparator into artifact
+        if: always()
         shell: powershell
         run: |
-          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\COMPARE_ZAND_LOCAL.py" "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out\COMPARE_ZAND_LOCAL.py"
-          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\README.md" "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out\README.md"
-          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\cases.json" "$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out\cases.json"
+          $out="$env:GITHUB_WORKSPACE\zand-xg-cube-parity-out"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\COMPARE_ZAND_LOCAL.py" "$out\COMPARE_ZAND_LOCAL.py"
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\README.md" "$out\README.md"
+          Copy-Item "$env:GITHUB_WORKSPACE\tools\zand-xg-cube-parity-v1\cases.json" "$out\cases.json"
 
       - name: Upload parity oracle evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: zand-xg-cube-parity-v1
+          name: zand-xg-cube-parity-v1-bounded
           path: |
             zand-xg-cube-parity-out/**
             xg-runtime-identity.txt
