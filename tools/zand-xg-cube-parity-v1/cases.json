@@ -1,0 +1,29 @@
+[
+  {"case_id":"MONEY_C1_CENTER","group":"money","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:0:0:0:0:10"},
+  {"case_id":"MONEY_C2_OWNER_NEG","group":"money","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:-1:-1:00:0:0:0:0:10"},
+  {"case_id":"MONEY_C2_OWNER_POS","group":"money","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:1:-1:00:0:0:0:0:10"},
+  {"case_id":"MONEY_C4_OWNER_NEG","group":"money","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":2,"cube_value":4,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:2:-1:-1:00:0:0:0:0:10"},
+  {"case_id":"MONEY_C4_OWNER_POS","group":"money","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":2,"cube_value":4,"cube_owner":1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:2:1:-1:00:0:0:0:0:10"},
+  {"case_id":"MONEY_C8_OWNER_NEG","group":"money","match_length":0,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":3,"cube_value":8,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:3:-1:-1:00:0:0:0:0:10"},
+
+  {"case_id":"M5_0_0_C1","group":"match5","match_length":5,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:0:0:0:5:10"},
+  {"case_id":"M5_0_0_C2_NEG","group":"match5","match_length":5,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:-1:-1:00:0:0:0:5:10"},
+  {"case_id":"M5_0_0_C2_POS","group":"match5","match_length":5,"score_self":0,"score_opp":0,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:1:-1:00:0:0:0:5:10"},
+  {"case_id":"M5_2_1_C1","group":"match5","match_length":5,"score_self":2,"score_opp":1,"crawford":0,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:2:1:0:5:10"},
+  {"case_id":"M5_2_1_C2_NEG","group":"match5","match_length":5,"score_self":2,"score_opp":1,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:-1:-1:00:2:1:0:5:10"},
+  {"case_id":"M5_2_1_C2_POS","group":"match5","match_length":5,"score_self":2,"score_opp":1,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:1:-1:00:2:1:0:5:10"},
+
+  {"case_id":"M7_4_3_C1","group":"match7","match_length":7,"score_self":4,"score_opp":3,"crawford":0,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:4:3:0:7:10"},
+  {"case_id":"M7_4_3_C2_NEG","group":"match7","match_length":7,"score_self":4,"score_opp":3,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:-1:-1:00:4:3:0:7:10"},
+  {"case_id":"M7_4_3_C2_POS","group":"match7","match_length":7,"score_self":4,"score_opp":3,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:1:-1:00:4:3:0:7:10"},
+  {"case_id":"M7_6_5_CRAWFORD","group":"match7-crawford","match_length":7,"score_self":6,"score_opp":5,"crawford":1,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:6:5:1:7:10"},
+  {"case_id":"M7_6_5_POST_C1","group":"match7-post","match_length":7,"score_self":6,"score_opp":5,"crawford":0,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:6:5:0:7:10"},
+  {"case_id":"M7_6_5_POST_C2_NEG","group":"match7-post","match_length":7,"score_self":6,"score_opp":5,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:-1:-1:00:6:5:0:7:10"},
+
+  {"case_id":"M11_5_5_C1","group":"match11","match_length":11,"score_self":5,"score_opp":5,"crawford":0,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:5:5:0:11:10"},
+  {"case_id":"M11_5_5_C2_NEG","group":"match11","match_length":11,"score_self":5,"score_opp":5,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:-1:-1:00:5:5:0:11:10"},
+  {"case_id":"M11_5_5_C2_POS","group":"match11","match_length":11,"score_self":5,"score_opp":5,"crawford":0,"cube_exp":1,"cube_value":2,"cube_owner":1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:1:1:-1:00:5:5:0:11:10"},
+  {"case_id":"M11_9_8_C1","group":"match11","match_length":11,"score_self":9,"score_opp":8,"crawford":0,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:9:8:0:11:10"},
+  {"case_id":"M11_9_8_C4_NEG","group":"match11","match_length":11,"score_self":9,"score_opp":8,"crawford":0,"cube_exp":2,"cube_value":4,"cube_owner":-1,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:2:-1:-1:00:9:8:0:11:10"},
+  {"case_id":"M11_10_8_CRAWFORD","group":"match11-crawford","match_length":11,"score_self":10,"score_opp":8,"crawford":1,"cube_exp":0,"cube_value":1,"cube_owner":0,"xgid":"XGID=-b----EBC---aCaa-b-d-b--bB:0:0:-1:00:10:8:1:11:10"}
+]
