@@ -1,0 +1,59 @@
+name: XG Zero Ply Oracle V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-zero-ply-oracle-v1.yml
+      - tools/xg-zero-ply-oracle-v1/**
+      - tools/xg-nn-dispatch-probe-v2/CAPTURE_XG_NN_DISPATCH_V2.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append
+          "XG_EXE_SHA256=$((Get-FileHash $e -Algorithm SHA256).Hash.ToLowerInvariant())"|Out-File $env:GITHUB_ENV -Append
+      - name: Capture exact verified XG 0-ply
+        id: cap
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-zero-ply-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-zero-ply-oracle-v1\RUN_ZERO_PLY.ps1" -ExePath $env:XG_EXE -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-zero-ply-oracle-v1\cases.json" -OutDir $out
+      - name: Summarize
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-zero-ply-out'
+          @('XG_ZERO_PLY_ORACLE_V1',"XG_EXE_SHA256=$env:XG_EXE_SHA256","CAPTURE_OUTCOME=${{ steps.cap.outcome }}",'COMMAND=Ctrl+0','PURPOSE=runtime differential parity only','TRAINING_ELIGIBLE=False')|Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
+          if(Test-Path (Join-Path $out 'capture-status.jsonl')){Get-Content (Join-Path $out 'capture-status.jsonl')}
+          Get-ChildItem (Join-Path $out 'raw') -Filter '*.txt' -ErrorAction SilentlyContinue|ForEach-Object{Get-Content $_.FullName}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-zero-ply-oracle-v1
+          path: |
+            xg-zero-ply-out/**
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
