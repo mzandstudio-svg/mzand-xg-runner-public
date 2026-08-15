@@ -1,6 +1,8 @@
 import sys,time,json,os,struct,zlib
 import frida
-pid=int(sys.argv[1]); model=sys.argv[2]; out=sys.argv[3]
+pid=int(sys.argv[1])
+model=os.environ['NIP_MODEL']
+out=os.environ['NIP_HOOK_OUT']
 os.makedirs(out,exist_ok=True)
 b=zlib.decompress(open(model,'rb').read())
 # slot0 first weight pattern (16 bytes is long enough and proven present in runtime memory)
@@ -36,13 +38,13 @@ else {
             for (const k in regs) {
               try {
                 const p=ptr(regs[k]);
-                const buf=p.readByteArray(2048);
+                const buf=p.readByteArray(4096);
                 send({type:'dump',reg:k,address:p.toString()},buf);
               } catch(e) {}
             }
             try {
               const sp=ptr(c.esp);
-              const sb=sp.readByteArray(8192);
+              const sb=sp.readByteArray(16384);
               send({type:'stack',address:sp.toString()},sb);
             } catch(e) {}
             send({type:'done'});
