@@ -37,14 +37,17 @@ if not h:
     raise OSError(ctypes.get_last_error(),'OpenProcess')
 
 ref=json.load(open(ref_path,'r',encoding='utf-8'))['inputs']
-if len(ref)!=250: raise RuntimeError('reference must contain 250 inputs')
+if len(ref)<200:
+    raise RuntimeError(f'reference must contain at least 200 inputs, got {len(ref)}')
 
 def fbytes(vals): return b''.join(struct.pack('<f',float(x)) for x in vals)
 patterns={
-    'full250_current':fbytes(ref),
     'base200_current':fbytes(ref[:200]),
     'half100_current':fbytes(ref[:100]),
 }
+if len(ref)>=250:
+    patterns['full250_current']=fbytes(ref[:250])
+
 # Starting board base-vector alternatives worth distinguishing if current historical
 # encoding is not what XG puts in memory.
 def make_half(kind):
@@ -132,11 +135,11 @@ for i,r in enumerate(uniq):
         r['zeros_250']=sum(v==0.0 for v in vals)
         r['ones_250']=sum(v==1.0 for v in vals)
 
-json.dump({'pid':pid,'region_count':len(regions),'patterns':{k:len(v) for k,v in patterns.items()},'hits':uniq},open(os.path.join(out,'scan.json'),'w',encoding='utf-8'),indent=2)
+json.dump({'pid':pid,'reference_input_count':len(ref),'region_count':len(regions),'patterns':{name:len(pat) for name,pat in patterns.items()},'hits':uniq},open(os.path.join(out,'scan.json'),'w',encoding='utf-8'),indent=2)
 json.dump(regions,open(os.path.join(out,'regions.json'),'w',encoding='utf-8'),indent=2)
 with open(os.path.join(out,'SUMMARY.txt'),'w',encoding='utf-8') as f:
-    f.write('XG_POST_ANALYSIS_MEMORY_SCAN_V1\n')
-    f.write(f'PID={pid}\nREGIONS={len(regions)}\nHITS={len(uniq)}\n')
+    f.write('XG_POST_ANALYSIS_MEMORY_SCAN_V2\n')
+    f.write(f'PID={pid}\nREFERENCE_INPUTS={len(ref)}\nREGIONS={len(regions)}\nHITS={len(uniq)}\n')
     for r in uniq:
         f.write(f"{r['pattern']} {r['address']} zeros={r.get('zeros_250','')} ones={r.get('ones_250','')} {r.get('dump_file','')}\n")
 k.CloseHandle(h)
