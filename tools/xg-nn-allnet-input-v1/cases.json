@@ -1,5 +1,5 @@
 [
-  {"case_id":"RACE_SEPARATED","xgid":"XGID=-BBBBBE------------ebbbbb-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"RACE_NONBEAROFF","xgid":"XGID=------E-E---E-e---e-e-----:0:0:1:00:0:0:3:0:10"},
   {"case_id":"CRASHED_COMPRESSED","xgid":"XGID=-EE---D-----c--cc-cc----A-:0:0:1:00:0:0:3:0:10"},
   {"case_id":"BACKGAME_REAL","xgid":"XGID=--bbBdBBCBBA----A--cbb----:0:0:1:00:0:0:3:0:10"}
 ]
