@@ -1,0 +1,91 @@
+{
+  "method": "cellwise minimax midrange over six redistributable METs; exact zero-sum symmetry enforced",
+  "target_tolerance_percentage_points": 3.0,
+  "xg_used_in_generation": false,
+  "xg_role": "private held-out benchmark only",
+  "public_source_tables": [
+    "GnuBG 11 point",
+    "Jacobs & Trice",
+    "Kazaross XG2",
+    "Rockwell-Kazaross",
+    "Snowie",
+    "Kit Woolsey"
+  ],
+  "all_tables_all_values_within_3pp": true,
+  "public_reference_summary": [
+    {
+      "name": "GnuBG 11 point",
+      "size": 25,
+      "held_out": false,
+      "pre_max_pp": 0.8000000000000007,
+      "pre_mean_pp": 0.3885571200000001,
+      "post_max_pp": 0.6143999999999983,
+      "overall_max_pp": 0.8000000000000007,
+      "overall_mean_pp": 0.3780964118471141,
+      "within_1pp_pct": 100.0,
+      "within_3pp_pct": 100.0
+    },
+    {
+      "name": "Jacobs & Trice",
+      "size": 25,
+      "held_out": false,
+      "pre_max_pp": 1.100000000000012,
+      "pre_mean_pp": 0.45994240000000003,
+      "post_max_pp": 0.48505000000000353,
+      "overall_max_pp": 1.100000000000012,
+      "overall_mean_pp": 0.4458138580198493,
+      "within_1pp_pct": 99.53846153846155,
+      "within_3pp_pct": 100.0
+    },
+    {
+      "name": "Kazaross XG2",
+      "size": 25,
+      "held_out": false,
+      "pre_max_pp": 1.1083999999999983,
+      "pre_mean_pp": 0.15367551999999987,
+      "post_max_pp": 1.1083999999999983,
+      "overall_max_pp": 1.1083999999999983,
+      "overall_mean_pp": 0.1564539834014891,
+      "within_1pp_pct": 99.53846153846155,
+      "within_3pp_pct": 100.0
+    },
+    {
+      "name": "Rockwell-Kazaross",
+      "size": 25,
+      "held_out": false,
+      "pre_max_pp": 1.1555999999999955,
+      "pre_mean_pp": 0.15509823999999983,
+      "post_max_pp": 1.155600000000001,
+      "overall_max_pp": 1.155600000000001,
+      "overall_mean_pp": 0.15800090647841217,
+      "within_1pp_pct": 99.53846153846155,
+      "within_3pp_pct": 100.0
+    },
+    {
+      "name": "Snowie",
+      "size": 15,
+      "held_out": false,
+      "pre_max_pp": 1.0999999999999954,
+      "pre_mean_pp": 0.5571706666666665,
+      "post_max_pp": 0.6850500000000037,
+      "overall_max_pp": 1.0999999999999954,
+      "overall_mean_pp": 0.5381128862940415,
+      "within_1pp_pct": 96.66666666666667,
+      "within_3pp_pct": 100.0
+    },
+    {
+      "name": "Kit Woolsey",
+      "size": 15,
+      "held_out": false,
+      "pre_max_pp": 1.1556000000000066,
+      "pre_mean_pp": 0.4099360000000004,
+      "post_max_pp": 1.155600000000001,
+      "overall_max_pp": 1.1556000000000066,
+      "overall_mean_pp": 0.40877163629404206,
+      "within_1pp_pct": 97.91666666666666,
+      "within_3pp_pct": 100.0
+    }
+  ],
+  "private_heldout_xg_max_abs_pp": 0.8700000000000041,
+  "private_heldout_xg_mean_abs_pp": 0.18054222112898763
+}
