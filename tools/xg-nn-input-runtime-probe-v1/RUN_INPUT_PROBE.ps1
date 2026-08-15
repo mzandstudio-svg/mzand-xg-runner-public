@@ -34,6 +34,13 @@ function InvokeOnePly(){
    if(Test-Path $fatal){throw ('Frida fatal before ready: '+(Get-Content $fatal -Raw))}
    if(-not(Test-Path $ready)){throw 'Frida hook did not become ready within 150s'}
  }
+ # Frida attach can cause the Trial Registration window to reappear after the
+ # position was already verified. Clear any post-attach modal before Ctrl+1.
+ for($mz=0;$mz -lt 8;$mz++){
+   [void](DismissSave 1)
+   [void](DismissRegistration 1)
+   Start-Sleep -Milliseconds 150
+ }
  FocusXg
  [System.Windows.Forms.SendKeys]::SendWait('^1')
 }
