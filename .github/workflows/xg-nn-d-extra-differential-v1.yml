@@ -1,0 +1,84 @@
+name: XG NN D Extra Differential V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-nn-d-extra-differential-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case_id: D_BASE
+            xgid: 'XGID=--bbBdBBCBBA----A--cbb----:0:0:1:00:0:0:3:0:10'
+          - case_id: D_H1
+            xgid: 'XGID=--bbBdBBCBBA----A--bbb--a-:0:0:1:00:0:0:3:0:10'
+          - case_id: D_H2
+            xgid: 'XGID=--bbBdBBCBBA----A--bbb-a--:0:0:1:00:0:0:3:0:10'
+          - case_id: D_H3
+            xgid: 'XGID=--bbBdBBCBBA----A--bbba---:0:0:1:00:0:0:3:0:10'
+          - case_id: D_H4
+            xgid: 'XGID=--bbBdBBCBBA----A--cba--a-:0:0:1:00:0:0:3:0:10'
+          - case_id: D_H5
+            xgid: 'XGID=--bbBdBBCBBA----A--dba----:0:0:1:00:0:0:3:0:10'
+          - case_id: D_H6
+            xgid: 'XGID=--bbBdBBCBBA----A--dab----:0:0:1:00:0:0:3:0:10'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $root='C:\Program Files (x86)\eXtreme Gammon 2';$e=Join-Path $root 'eXtremeGammon2.exe';$m=Join-Path $root 'eXtremeGammon v2.dat'
+          if(-not(Test-Path $e)){throw 'XG exe missing'};if(-not(Test-Path $m)){throw 'XG model missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append;"XG_MODEL=$m"|Out-File $env:GITHUB_ENV -Append
+      - name: Create isolated differential case
+        shell: powershell
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+          CASE_XGID: ${{ matrix.xgid }}
+        run: |
+          @([pscustomobject]@{case_id=$env:CASE_ID;xgid=$env:CASE_XGID}) | ConvertTo-Json | Out-File "$env:RUNNER_TEMP\case.json" -Encoding utf8
+      - name: Capture live D input
+        id: cap
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-d-diff-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-nn-allnet-input-v1\RUN_ALLNET.ps1" -ExePath $env:XG_EXE -ModelPath $env:XG_MODEL -CasesPath "$env:RUNNER_TEMP\case.json" -OutDir $out
+      - name: Print active D extra
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-d-diff-out'
+          Get-ChildItem $out -Recurse -Filter allnet.json -ErrorAction SilentlyContinue | ForEach-Object {
+            $j=Get-Content $_.FullName -Raw|ConvertFrom-Json
+            foreach($r in $j.records){
+              if($r.network -eq 'D' -and ($r.output_values|Where-Object{[math]::Abs([double]$_)-gt 1e-12}).Count -gt 0){
+                "ACTIVE_D object=$($r.object) input250=$($r.input_values[250]) input251=$($r.input_values[251]) out=$($r.output_values -join ',')"
+              }
+            }
+          }
+          if(Test-Path (Join-Path $out 'capture-status.jsonl')){Get-Content (Join-Path $out 'capture-status.jsonl')}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-nn-${{ matrix.case_id }}-extra-v1
+          path: xg-d-diff-out/**
+          if-no-files-found: error
+          retention-days: 14
