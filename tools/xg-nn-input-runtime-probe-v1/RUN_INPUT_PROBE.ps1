@@ -22,9 +22,17 @@ $deadline=(Get-Date).AddSeconds(150)
 while((Get-Date) -lt $deadline -and -not(Test-Path $ready) -and -not(Test-Path $fatal)){Start-Sleep -Milliseconds 250}
 if(Test-Path $fatal){throw ('Frida fatal before ready: '+(Get-Content $fatal -Raw))}
 if(-not(Test-Path $ready)){throw 'Frida hook did not become ready within 150s'}
+
+# Frida attachment changes startup timing enough that Registration and Save Game
+# can be stacked. Clear both repeatedly before the first XGID import.
+for($mz=0;$mz -lt 8;$mz++){
+  [void](DismissSave 1)
+  [void](DismissRegistration 1)
+  Start-Sleep -Milliseconds 200
+}
 '@
 $src=$src.Replace($needle,$needle+$inject)
-# Give the hook time after both duplicated START analyses before XG is killed.
+# Give the hook time after the analysis before XG is killed.
 $killNeedle="Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue"
 $killInject=@'
 $done=Join-Path $env:NIP_HOOK_OUT 'DONE';$deadline=(Get-Date).AddSeconds(30)
