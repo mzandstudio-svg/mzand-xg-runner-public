@@ -12,17 +12,22 @@ const pattern = __PATTERN__;
 const blockSize = __BLOCKSIZE__;
 const ranges=[];
 const seen={};
-for (const r of Process.enumerateRanges('rw-')) {
+const scanRanges=Process.enumerateRanges('rw-').filter(r => {
+  const a=r.base.toUInt32();
+  return a < 0x20000000 && r.size >= 0x30000 && r.size <= 0x1000000;
+});
+send({type:'scan_ranges',count:scanRanges.length,total_bytes:scanRanges.reduce((s,r)=>s+r.size,0)});
+for (const r of scanRanges) {
   try {
     const hits = Memory.scanSync(r.base, r.size, pattern);
     for (const h of hits) {
       const base=h.address.sub(24);
       const key=base.toString();
-      if (!seen[key]) { seen[key]=true; ranges.push({base:base,size:blockSize}); send({type:'weight_copy',base:key}); }
+      if (!seen[key]) { seen[key]=true; ranges.push({base:base,size:blockSize}); send({type:'weight_copy',base:key,region:r.base.toString(),region_size:r.size}); }
     }
   } catch (e) {}
 }
-if (ranges.length===0) { send({type:'fatal',error:'slot0 weight copies not found'}); }
+if (ranges.length===0) { send({type:'fatal',error:'slot0 weight copies not found in filtered heap ranges'}); }
 else {
   send({type:'monitoring',copies:ranges.length});
   let fired=false;
@@ -65,17 +70,17 @@ else {
   });
   send({type:'ready'});
 }
-'''.replace('__PATTERN__',__import__('json').dumps(pat)).replace('__BLOCKSIZE__',str(slot0_bytes))
+'''.replace('__PATTERN__',json.dumps(pat)).replace('__BLOCKSIZE__',str(slot0_bytes))
 session=frida.attach(pid)
 script=session.create_script(js)
 state={'n':0}
 def on_message(message,data):
     if message.get('type')!='send':
-        open(os.path.join(out,'frida-errors.txt'),'a').write(__import__('json').dumps(message)+'\n');return
+        open(os.path.join(out,'frida-errors.txt'),'a').write(json.dumps(message)+'\n');return
     p=message['payload']; typ=p.get('type','unknown')
-    open(os.path.join(out,'events.jsonl'),'a').write(__import__('json').dumps(p)+'\n')
+    open(os.path.join(out,'events.jsonl'),'a').write(json.dumps(p)+'\n')
     if typ=='ready': open(os.path.join(out,'READY'),'w').write('1')
-    if typ=='access': open(os.path.join(out,'ACCESS'),'w').write(__import__('json').dumps(p))
+    if typ=='access': open(os.path.join(out,'ACCESS'),'w').write(json.dumps(p))
     if typ in ('dump','stack') and data is not None:
         state['n']+=1
         name=f"{state['n']:02d}_{typ}_{p.get('reg','')}_{p.get('address','').replace('0x','')}.bin"
@@ -84,7 +89,7 @@ def on_message(message,data):
     if typ=='fatal': open(os.path.join(out,'FATAL'),'w').write(p.get('error','fatal'))
 script.on('message',on_message)
 script.load()
-for _ in range(180):
+for _ in range(240):
     if os.path.exists(os.path.join(out,'DONE')) or os.path.exists(os.path.join(out,'FATAL')): break
     time.sleep(1)
 try: script.unload(); session.detach()
