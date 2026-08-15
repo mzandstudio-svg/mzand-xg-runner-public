@@ -20,6 +20,53 @@ function InvokeOnePly(){
 }
 '@
 $new=@'
+function FindRegistrationAny(){
+ $root=[System.Windows.Automation.AutomationElement]::RootElement
+ $wins=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
+ foreach($w in $wins){try{if([string]$w.Current.Name -eq 'Registration'){return $w}}catch{}}
+ return $null
+}
+function ClickElementCenter($el){
+ if($null -eq $el){return $false}
+ try{
+   $r=$el.Current.BoundingRectangle
+   if($r.Width -le 0 -or $r.Height -le 0){return $false}
+   [System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point([int]($r.X+$r.Width/2),[int]($r.Y+$r.Height/2))
+   Start-Sleep -Milliseconds 120
+   Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class MZMouse {
+ [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,UIntPtr e);
+}
+"@ -ErrorAction SilentlyContinue
+   [MZMouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 80;[MZMouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
+   return $true
+ }catch{return $false}
+}
+function ForceCloseRegistration(){
+ for($mz=0;$mz -lt 10;$mz++){
+   [void](DismissRegistration 1)
+   $reg=FindRegistrationAny
+   if($null -eq $reg){return $true}
+   $close=$reg.FindFirst([System.Windows.Automation.TreeScope]::Descendants,(New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'Close')))
+   if($null -ne $close){
+     try{$close.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}catch{[void](ClickElementCenter $close)}
+     Start-Sleep -Milliseconds 700
+   }
+   $reg=FindRegistrationAny
+   if($null -eq $reg){return $true}
+   try{[D2N]::SetForegroundWindow([IntPtr]$reg.Current.NativeWindowHandle)|Out-Null}catch{}
+   Start-Sleep -Milliseconds 120
+   try{[System.Windows.Forms.SendKeys]::SendWait('{ESC}')}catch{}
+   Start-Sleep -Milliseconds 400
+   if($null -ne (FindRegistrationAny)){
+     try{[System.Windows.Forms.SendKeys]::SendWait('%{F4}')}catch{}
+     Start-Sleep -Milliseconds 500
+   }
+ }
+ return ($null -eq (FindRegistrationAny))
+}
 function InvokeOnePly(){
  [void](DismissSave 1)
  [void](DismissRegistration 2)
@@ -34,30 +81,7 @@ function InvokeOnePly(){
    if(Test-Path $fatal){throw ('Frida fatal before ready: '+(Get-Content $fatal -Raw))}
    if(-not(Test-Path $ready)){throw 'Frida hook did not become ready within 150s'}
  }
-
- # Frida attach can cause Trial Registration to reappear after the XGID was
- # already verified. First use UIAutomation. If the modal is still visible,
- # explicitly focus that dialog and close it with Escape / Alt-F4. Refuse to
- # send Ctrl+1 while Registration is still present.
- for($mz=0;$mz -lt 6;$mz++){
-   [void](DismissSave 1)
-   [void](DismissRegistration 1)
-   $reg=FindDialog 'Registration'
-   if($null -eq $reg){break}
-   try{
-     $pat=$reg.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
-     $pat.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal)
-   }catch{}
-   try{[D2N]::SetForegroundWindow([IntPtr]$reg.Current.NativeWindowHandle)|Out-Null}catch{}
-   Start-Sleep -Milliseconds 200
-   try{[System.Windows.Forms.SendKeys]::SendWait('{ESC}')}catch{}
-   Start-Sleep -Milliseconds 400
-   if($null -ne (FindDialog 'Registration')){
-     try{[System.Windows.Forms.SendKeys]::SendWait('%{F4}')}catch{}
-     Start-Sleep -Milliseconds 500
-   }
- }
- if($null -ne (FindDialog 'Registration')){throw 'Registration modal still present after post-attach close attempts'}
+ if(-not(ForceCloseRegistration)){throw 'Registration modal still present after cross-process close attempts'}
  [void](DismissSave 1)
  FocusXg
  [System.Windows.Forms.SendKeys]::SendWait('^1')
