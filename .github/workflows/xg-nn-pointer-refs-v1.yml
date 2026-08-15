@@ -1,0 +1,59 @@
+name: XG NN Pointer Refs V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-nn-pointer-refs-v1.yml
+      - tools/xg-nn-pointer-refs-v1/**
+      - tools/xg-nn-dispatch-probe-v2/CAPTURE_XG_NN_DISPATCH_V2.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $root='C:\Program Files (x86)\eXtreme Gammon 2';$e=Join-Path $root 'eXtremeGammon2.exe';$m=Join-Path $root 'eXtremeGammon v2.dat'
+          if(-not(Test-Path $e)){throw 'XG exe missing'};if(-not(Test-Path $m)){throw 'XG model missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append;"XG_MODEL=$m"|Out-File $env:GITHUB_ENV -Append
+          "XG_EXE_SHA256=$((Get-FileHash $e -Algorithm SHA256).Hash.ToLowerInvariant())"|Out-File $env:GITHUB_ENV -Append
+      - name: Analyze exact start 1-ply then resolve NN weight pointers
+        id: cap
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-nn-pointer-refs-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-nn-pointer-refs-v1\RUN_REFS.ps1" -ExePath $env:XG_EXE -ModelPath $env:XG_MODEL -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-nn-pointer-refs-v1\cases.json" -OutDir $out
+      - name: Summarize
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-nn-pointer-refs-out'
+          @('XG_NN_POINTER_REFS_V1',"XG_EXE_SHA256=$env:XG_EXE_SHA256","CAPTURE_OUTCOME=${{ steps.cap.outcome }}",'ORACLE=verified XG direct 1-ply','METHOD=read-only weight-copy and pointer-reference scan','PURPOSE=runtime interoperability parity only','TRAINING_ELIGIBLE=False')|Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
+          Get-ChildItem $out -Recurse -Filter SUMMARY.txt -ErrorAction SilentlyContinue|ForEach-Object{Get-Content $_.FullName}
+          if(Test-Path (Join-Path $out 'capture-status.jsonl')){Get-Content (Join-Path $out 'capture-status.jsonl')}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-nn-pointer-refs-v1
+          path: |
+            xg-nn-pointer-refs-out/**
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
