@@ -1,0 +1,57 @@
+name: XG Analyze Level Dump V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-analyze-level-dump-v1.yml
+      - tools/xg-analyze-level-dump-v1/**
+      - tools/xg-nn-dispatch-probe-v2/CAPTURE_XG_NN_DISPATCH_V2.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append
+      - name: Dump Analyze Level dialog
+        id: cap
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-analyze-level-dump-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-analyze-level-dump-v1\RUN_DUMP.ps1" -ExePath $env:XG_EXE -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-analyze-level-dump-v1\cases.json" -OutDir $out
+      - name: Summarize
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-analyze-level-dump-out'
+          @('XG_ANALYZE_LEVEL_DUMP_V1',"CAPTURE_OUTCOME=${{ steps.cap.outcome }}",'PURPOSE=runtime interoperability parity only','TRAINING_ELIGIBLE=False')|Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
+          if(Test-Path (Join-Path $out 'analyze-level-ui.txt')){Get-Content (Join-Path $out 'analyze-level-ui.txt')|Select-String -Pattern '0-ply|1-ply|2-ply|3-ply|Roller|Evaluation|Preset|Level|Move|Cube'}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-analyze-level-dump-v1
+          path: |
+            xg-analyze-level-dump-out/**
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
