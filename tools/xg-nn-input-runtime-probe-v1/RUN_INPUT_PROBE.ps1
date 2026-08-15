@@ -34,13 +34,31 @@ function InvokeOnePly(){
    if(Test-Path $fatal){throw ('Frida fatal before ready: '+(Get-Content $fatal -Raw))}
    if(-not(Test-Path $ready)){throw 'Frida hook did not become ready within 150s'}
  }
- # Frida attach can cause the Trial Registration window to reappear after the
- # position was already verified. Clear any post-attach modal before Ctrl+1.
- for($mz=0;$mz -lt 8;$mz++){
+
+ # Frida attach can cause Trial Registration to reappear after the XGID was
+ # already verified. First use UIAutomation. If the modal is still visible,
+ # explicitly focus that dialog and close it with Escape / Alt-F4. Refuse to
+ # send Ctrl+1 while Registration is still present.
+ for($mz=0;$mz -lt 6;$mz++){
    [void](DismissSave 1)
    [void](DismissRegistration 1)
-   Start-Sleep -Milliseconds 150
+   $reg=FindDialog 'Registration'
+   if($null -eq $reg){break}
+   try{
+     $pat=$reg.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+     $pat.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal)
+   }catch{}
+   try{[D2N]::SetForegroundWindow([IntPtr]$reg.Current.NativeWindowHandle)|Out-Null}catch{}
+   Start-Sleep -Milliseconds 200
+   try{[System.Windows.Forms.SendKeys]::SendWait('{ESC}')}catch{}
+   Start-Sleep -Milliseconds 400
+   if($null -ne (FindDialog 'Registration')){
+     try{[System.Windows.Forms.SendKeys]::SendWait('%{F4}')}catch{}
+     Start-Sleep -Milliseconds 500
+   }
  }
+ if($null -ne (FindDialog 'Registration')){throw 'Registration modal still present after post-attach close attempts'}
+ [void](DismissSave 1)
  FocusXg
  [System.Windows.Forms.SendKeys]::SendWait('^1')
 }
