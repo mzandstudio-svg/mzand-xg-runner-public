@@ -1,29 +1,39 @@
-import sys,time,json,os,struct,zlib
+import sys,time,json,os,zlib
 import frida
 pid=int(sys.argv[1])
 model=os.environ['NIP_MODEL']
 out=os.environ['NIP_HOOK_OUT']
 os.makedirs(out,exist_ok=True)
 b=zlib.decompress(open(model,'rb').read())
-# slot0 first weight pattern (16 bytes is long enough and proven present in runtime memory)
 pat=' '.join(f'{x:02x}' for x in b[24:24+16])
+slot0_bytes=262188
 js=r'''
 const pattern = __PATTERN__;
-let target = null;
+const blockSize = __BLOCKSIZE__;
+const ranges=[];
+const seen={};
 for (const r of Process.enumerateRanges('rw-')) {
   try {
     const hits = Memory.scanSync(r.base, r.size, pattern);
-    if (hits.length) { target = hits[0].address; break; }
+    for (const h of hits) {
+      const base=h.address.sub(24);
+      const key=base.toString();
+      if (!seen[key]) { seen[key]=true; ranges.push({base:base,size:blockSize}); send({type:'weight_copy',base:key}); }
+    }
   } catch (e) {}
 }
-if (target === null) { send({type:'fatal',error:'weight pattern not found'}); }
+if (ranges.length===0) { send({type:'fatal',error:'slot0 weight copies not found'}); }
 else {
-  send({type:'weight',address:target.toString()});
-  MemoryAccessMonitor.enable({base: target.and(ptr('0xfffff000')), size: 4096}, {
+  send({type:'monitoring',copies:ranges.length});
+  let fired=false;
+  MemoryAccessMonitor.enable(ranges, {
     onAccess(details) {
+      if (fired) return;
+      fired=true;
       try { MemoryAccessMonitor.disable(); } catch(e) {}
       const from = details.from;
-      send({type:'access',from:from.toString(),operation:details.operation,address:details.address.toString(),instruction:Instruction.parse(from).toString()});
+      let ins=''; try { ins=Instruction.parse(from).toString(); } catch(e) { ins='parse_failed'; }
+      send({type:'access',from:from.toString(),operation:details.operation,address:details.address.toString(),instruction:ins});
       let captured=false;
       try {
         Interceptor.attach(from, {
@@ -32,19 +42,19 @@ else {
             captured=true;
             const c=this.context;
             const regs={eax:c.eax,ebx:c.ebx,ecx:c.ecx,edx:c.edx,esi:c.esi,edi:c.edi,ebp:c.ebp,esp:c.esp,eip:c.eip};
-            const meta={type:'context',from:from.toString(),instruction:Instruction.parse(from).toString(),regs:{}};
+            const meta={type:'context',from:from.toString(),instruction:ins,regs:{}};
             for (const k in regs) meta.regs[k]=regs[k].toString();
             send(meta);
             for (const k in regs) {
               try {
                 const p=ptr(regs[k]);
-                const buf=p.readByteArray(4096);
+                const buf=p.readByteArray(8192);
                 send({type:'dump',reg:k,address:p.toString()},buf);
               } catch(e) {}
             }
             try {
               const sp=ptr(c.esp);
-              const sb=sp.readByteArray(16384);
+              const sb=sp.readByteArray(32768);
               send({type:'stack',address:sp.toString()},sb);
             } catch(e) {}
             send({type:'done'});
@@ -55,17 +65,17 @@ else {
   });
   send({type:'ready'});
 }
-'''.replace('__PATTERN__',json.dumps(pat))
+'''.replace('__PATTERN__',__import__('json').dumps(pat)).replace('__BLOCKSIZE__',str(slot0_bytes))
 session=frida.attach(pid)
 script=session.create_script(js)
 state={'n':0}
 def on_message(message,data):
     if message.get('type')!='send':
-        open(os.path.join(out,'frida-errors.txt'),'a').write(json.dumps(message)+'\n');return
+        open(os.path.join(out,'frida-errors.txt'),'a').write(__import__('json').dumps(message)+'\n');return
     p=message['payload']; typ=p.get('type','unknown')
-    open(os.path.join(out,'events.jsonl'),'a').write(json.dumps(p)+'\n')
+    open(os.path.join(out,'events.jsonl'),'a').write(__import__('json').dumps(p)+'\n')
     if typ=='ready': open(os.path.join(out,'READY'),'w').write('1')
-    if typ=='access': open(os.path.join(out,'ACCESS'),'w').write(json.dumps(p))
+    if typ=='access': open(os.path.join(out,'ACCESS'),'w').write(__import__('json').dumps(p))
     if typ in ('dump','stack') and data is not None:
         state['n']+=1
         name=f"{state['n']:02d}_{typ}_{p.get('reg','')}_{p.get('address','').replace('0x','')}.bin"
