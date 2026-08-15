@@ -16,7 +16,7 @@ $inject=@'
 # NN input probe injection: attach Frida before any 1-ply command.
 $hookLog=Join-Path $env:NIP_HOOK_OUT 'hook-stdout.txt'
 $hookErr=Join-Path $env:NIP_HOOK_OUT 'hook-stderr.txt'
-$hp=Start-Process python -ArgumentList @($env:NIP_HOOK,[string]$xg.Id,$env:NIP_MODEL,$env:NIP_HOOK_OUT) -PassThru -RedirectStandardOutput $hookLog -RedirectStandardError $hookErr
+$hp=Start-Process python -ArgumentList @($env:NIP_HOOK,[string]$xg.Id) -PassThru -RedirectStandardOutput $hookLog -RedirectStandardError $hookErr
 $ready=Join-Path $env:NIP_HOOK_OUT 'READY';$fatal=Join-Path $env:NIP_HOOK_OUT 'FATAL'
 $deadline=(Get-Date).AddSeconds(35)
 while((Get-Date) -lt $deadline -and -not(Test-Path $ready) -and -not(Test-Path $fatal)){Start-Sleep -Milliseconds 250}
