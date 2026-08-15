@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/xg-nn-input-runtime-probe-v1.yml
       - tools/xg-nn-input-runtime-probe-v1/**
+      - tools/xg-nn-dispatch-probe-v2/CAPTURE_XG_NN_DISPATCH_V2.ps1
   workflow_dispatch:
 
 permissions:
@@ -32,7 +33,7 @@ jobs:
           $root='C:\Program Files (x86)\eXtreme Gammon 2';$e=Join-Path $root 'eXtremeGammon2.exe';$m=Join-Path $root 'eXtremeGammon v2.dat'
           if(-not(Test-Path $e)){throw 'XG exe missing'};if(-not(Test-Path $m)){throw 'XG model missing'}
           "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append;"XG_MODEL=$m"|Out-File $env:GITHUB_ENV -Append
-      - name: Capture runtime NN input context V3
+      - name: Capture runtime NN input context V4 modal-safe
         id: probe
         continue-on-error: true
         shell: powershell
