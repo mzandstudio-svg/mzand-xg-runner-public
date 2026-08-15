@@ -1,0 +1,48 @@
+name: XG Input Permutation Scan V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-input-permutation-scan-v1.yml
+      - tools/xg-input-permutation-scan-v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append
+          "XG_EXE_SHA256=$((Get-FileHash $e -Algorithm SHA256).Hash.ToLowerInvariant())"|Out-File $env:GITHUB_ENV -Append
+      - name: Scan executable for exact permutation tables
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-input-permutation-scan-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          python "$env:GITHUB_WORKSPACE\tools\xg-input-permutation-scan-v1\scan_permutations.py" $env:XG_EXE (Join-Path $out 'permutation_hits.json') | Tee-Object (Join-Path $out 'SUMMARY.txt')
+          @('XG_INPUT_PERMUTATION_SCAN_V1',"XG_EXE_SHA256=$env:XG_EXE_SHA256",'METHOD=static read-only exact-set scan','PURPOSE=runtime interoperability parity only','TRAINING_ELIGIBLE=False')|Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
+      - name: Upload evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-input-permutation-scan-v1
+          path: |
+            xg-input-permutation-scan-out/**
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
