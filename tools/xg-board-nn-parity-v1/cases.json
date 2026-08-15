@@ -1,5 +1,10 @@
 [
   {"case_id":"START","xgid":"XGID=-b----E-C---eE---c-e----B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"AFTER31_A","xgid":"XGID=-b----E-C---eE---c-e-A-A--:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"AFTER31_B","xgid":"XGID=-b----E-C---eE---c-eA---A-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"AFTER31_C","xgid":"XGID=-b----E-C-A-eD---c-e---AA-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"AFTER31_D","xgid":"XGID=-b----E-CA--eD---c-e----B-:0:0:1:00:0:0:3:0:10"},
+  {"case_id":"AFTER31_E","xgid":"XGID=-b---AEAA---eE---c-e----B-:0:0:1:00:0:0:3:0:10"},
   {"case_id":"RACE_SEPARATED","xgid":"XGID=-BBBBBE------------ebbbbb-:0:0:1:00:0:0:3:0:10"},
   {"case_id":"CRASHED_COMPRESSED","xgid":"XGID=-EE---D-----c--cc-cc----A-:0:0:1:00:0:0:3:0:10"},
   {"case_id":"DEEP_STRUCTURE","xgid":"XGID=-FC---A-----cA-cc-cc--B-B-:0:0:1:00:0:0:3:0:10"},
