@@ -17,6 +17,7 @@ foreach($c in $cases){
  $xg=Start-Process $env:xgexe -WorkingDirectory (Split-Path -Parent $env:xgexe) -PassThru
  Start-Sleep 5
  $xg.Refresh(); if($xg.HasExited){throw 'XG exited during per-case restart'}
+ [void](DismissRegistration 10)
 '@
 $src=$src.Replace($anchor,$insert)
 $temp=Join-Path $env:RUNNER_TEMP 'xg-nn-restart-each-generated.ps1'
