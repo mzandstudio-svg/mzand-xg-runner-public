@@ -7,6 +7,22 @@ param(
 $ErrorActionPreference='Stop'
 $workspace=$env:GITHUB_WORKSPACE
 $src=Get-Content (Join-Path $workspace 'tools\xg-nn-dispatch-probe-v2\CAPTURE_XG_NN_DISPATCH_V2.ps1') -Raw
+
+# Each oracle case gets a fresh XG process. This prevents the trial/save modal state
+# of one case from contaminating the next import and makes B/C/D capture independent.
+$anchor='foreach($c in $cases){'
+if(-not $src.Contains($anchor)){throw 'foreach anchor missing'}
+$restart=@'
+foreach($c in $cases){
+ Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue
+ Start-Sleep -Milliseconds 900
+ $xg=Start-Process $env:xgexe -WorkingDirectory (Split-Path -Parent $env:xgexe) -PassThru
+ Start-Sleep 5
+ $xg.Refresh();if($xg.HasExited){throw 'XG exited during per-case restart'}
+ [void](DismissRegistration 10)
+'@
+$src=$src.Replace($anchor,$restart)
+
 $needle='$row.export_length=$text.Length;$row.analysis_found=HasAnalysis $text;$row.mentions_1ply=($text -match ''(?i)1[- ]ply'')'
 if(-not $src.Contains($needle)){throw 'post-analysis anchor missing'}
 $inject=@'
