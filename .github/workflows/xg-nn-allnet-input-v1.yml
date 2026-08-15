@@ -1,0 +1,59 @@
+name: XG NN AllNet Input V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-nn-allnet-input-v1.yml
+      - tools/xg-nn-allnet-input-v1/**
+      - tools/xg-nn-dispatch-probe-v2/CAPTURE_XG_NN_DISPATCH_V2.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $root='C:\Program Files (x86)\eXtreme Gammon 2';$e=Join-Path $root 'eXtremeGammon2.exe';$m=Join-Path $root 'eXtremeGammon v2.dat'
+          if(-not(Test-Path $e)){throw 'XG exe missing'};if(-not(Test-Path $m)){throw 'XG model missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append;"XG_MODEL=$m"|Out-File $env:GITHUB_ENV -Append
+          "XG_EXE_SHA256=$((Get-FileHash $e -Algorithm SHA256).Hash.ToLowerInvariant())"|Out-File $env:GITHUB_ENV -Append
+      - name: Capture verified direct-1-ply live NN inputs for B C D cases
+        id: cap
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-nn-allnet-input-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-nn-allnet-input-v1\RUN_ALLNET.ps1" -ExePath $env:XG_EXE -ModelPath $env:XG_MODEL -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-nn-allnet-input-v1\cases.json" -OutDir $out
+      - name: Summarize
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-nn-allnet-input-out'
+          @('XG_NN_ALLNET_INPUT_V1',"XG_EXE_SHA256=$env:XG_EXE_SHA256","CAPTURE_OUTCOME=${{ steps.cap.outcome }}",'ORACLE=exact XGID + direct 1-ply','METHOD=read-only live NN descriptor/input decode','PURPOSE=runtime interoperability parity only','TRAINING_ELIGIBLE=False')|Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
+          Get-ChildItem $out -Recurse -Filter SUMMARY.txt -ErrorAction SilentlyContinue|ForEach-Object{Get-Content $_.FullName}
+          if(Test-Path (Join-Path $out 'capture-status.jsonl')){Get-Content (Join-Path $out 'capture-status.jsonl')}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-nn-allnet-input-v1
+          path: |
+            xg-nn-allnet-input-out/**
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
