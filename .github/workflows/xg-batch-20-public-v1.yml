@@ -1,4 +1,4 @@
-name: XG Batch 20 V1
+name: XG Batch 20 Public V2
 
 on:
   workflow_dispatch:
@@ -19,8 +19,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install XG
         shell: powershell
@@ -36,51 +34,23 @@ jobs:
           if(-not(Test-Path $e)){throw 'XG executable missing'}
           "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
 
-      - name: Build and run batch-20 driver from proven v26 startup
+      - name: Run public proven startup and batch 20
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
 
-          # Immutable proven historical foundation:
-          # v14 startup + v18 wizard continuation + v19 registration handling.
-          $v14='e07ccc3fb42d34053f05e09b7f431803b71d16a2'
-          $v18='d161e73d23713ed254c6159f30ad77c1e0655672'
-          $v19='17d31174af10758b2d06e41803c4d8d06c326a6e'
-          foreach($c in @($v14,$v18,$v19)){ git fetch origin $c --depth=1 }
-
-          $y14=(git show "$v14`:.github/workflows/xg-github-ui-bootstrap-v14.yml"|Out-String)
-          $m14=[regex]::Match($y14,'(?ms)^      - name: Run v14 exact English UI flow\r?\n        shell: powershell\r?\n        run: \|\r?\n(?<script>.*?)(?=^      - name: Upload v14 evidence)')
-          if(-not$m14.Success){throw 'v14 extraction failed'}
-          $base=$m14.Groups['script'].Value -replace '(?m)^          ',''
-          $base=$base.Replace('xg-ui-bootstrap-v14-report.txt','xg-batch20-bootstrap-report.txt').Replace('XG UI bootstrap v14','XG Batch 20 V1')
-          $mark="Click `$next;'BOARD_NEXT_CLICKED: True'|Out-File `$report -Append"
-          $idx=$base.IndexOf($mark,[System.StringComparison]::Ordinal)
-          if($idx-lt0){throw 'v14 board marker missing'}
-          $prefix=$base.Substring(0,$idx)
-
-          $y18=(git show "$v18`:.github/workflows/xg-github-ui-bootstrap-v18-push.yml"|Out-String)
-          $m18=[regex]::Match($y18,"(?ms)^          \`$tail=@'\r?\n(?<tail>.*?)(?=^          '@\r?$)")
-          if(-not$m18.Success){throw 'v18 continuation extraction failed'}
-          $tail18=$m18.Groups['tail'].Value -replace '(?m)^          ',''
-          $pm="Start-Sleep 2;Snap 'post-wizard-2s'"
-          $pi=$tail18.IndexOf($pm,[System.StringComparison]::Ordinal)
-          if($pi-lt0){throw 'v18 post-wizard marker missing'}
-          $throughWizard=$tail18.Substring(0,$pi)
-
-          $y19=(git show "$v19`:.github/workflows/xg-github-ui-bootstrap-v19-push.yml"|Out-String)
-          $m19=[regex]::Match($y19,"(?ms)^          \`$registration=@'\r?\n(?<reg>.*?)(?=^          '@\r?$)")
-          if(-not$m19.Success){throw 'v19 registration extraction failed'}
-          $reg=$m19.Groups['reg'].Value -replace '(?m)^          ',''
-          $rm="Start-Sleep 2;Snap 'post-registration-2s'"
-          $ri=$reg.IndexOf($rm,[System.StringComparison]::Ordinal)
-          if($ri-lt0){throw 'v19 post-registration marker missing'}
-          $throughRegistration=$reg.Substring(0,$ri)
+          $yaml=Get-Content "$env:GITHUB_WORKSPACE\.github\workflows\xg-analyze-level-public-v1.yml" -Raw
+          $m=[regex]::Match($yaml,'(?ms)^      - name: Run proven startup and capture Analyze Level\r?\n        shell: powershell\r?\n        run: \|\r?\n(?<script>.*?)(?=^      - name: Upload evidence)')
+          if(-not$m.Success){throw 'Could not extract public v1 proven startup'}
+          $script=$m.Groups['script'].Value -replace '(?m)^          ',''
+          $script=$script.Replace('xg-public-v1-report.txt','xg-batch20-bootstrap-report.txt').Replace('XG public Analyze Level v1','XG Batch 20 Public V2')
+          $marker="'XGID_POSITION_READY: True'|Out-File `$report -Append"
+          $idx=$script.IndexOf($marker,[System.StringComparison]::Ordinal)
+          if($idx-lt0){throw 'v1 XGID_POSITION_READY marker missing'}
+          $prefix=$script.Substring(0,$idx+$marker.Length)
 
           $batch=@'
-          Add-Type -AssemblyName UIAutomationClient
-          Add-Type -AssemblyName UIAutomationTypes
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
+
           Add-Type @"
           using System;
           using System.Text;
@@ -105,17 +75,9 @@ jobs:
             if($null-eq$s){return ''}
             return (($s -replace '&','') -split "`t")[0].Trim()
           }
-          function Shot([string]$path){
-            $b=[System.Windows.Forms.SystemInformation]::VirtualScreen
-            $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height
-            $g=[System.Drawing.Graphics]::FromImage($bmp)
-            $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size)
-            $bmp.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
-            $g.Dispose();$bmp.Dispose()
-          }
           function DumpUI([int]$pid,[string]$path){
-            $root=[System.Windows.Automation.AutomationElement]::RootElement
-            $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+            $rr=[System.Windows.Automation.AutomationElement]::RootElement
+            $all=$rr.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
             $L=New-Object 'System.Collections.Generic.List[string]'
             foreach($e in $all){
               try{
@@ -127,48 +89,44 @@ jobs:
             }
             $L|Out-File $path -Encoding utf8
           }
+          function Shot([string]$path){
+            $b=[System.Windows.Forms.SystemInformation]::VirtualScreen
+            $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height
+            $g=[System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size)
+            $bmp.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose();$bmp.Dispose()
+          }
           function FindAnalyzeCommand([IntPtr]$hwnd){
             $menu=[B20N]::GetMenu($hwnd)
             if($menu-eq[IntPtr]::Zero){return $null}
             $topCount=[B20N]::GetMenuItemCount($menu)
+            $dump=New-Object 'System.Collections.Generic.List[string]'
             for($i=0;$i-lt$topCount;$i++){
-              $name=Norm (MenuText $menu $i)
-              if($name-eq'Analyze'){
-                $sub=[B20N]::GetSubMenu($menu,$i)
+              $top=Norm (MenuText $menu $i)
+              $sub=[B20N]::GetSubMenu($menu,$i)
+              $dump.Add("TOP Index=$i Name=[$top] Child=$sub")
+              if($top-eq'Analyze' -and $sub-ne[IntPtr]::Zero){
                 $n=[B20N]::GetMenuItemCount($sub)
-                $dump=New-Object 'System.Collections.Generic.List[string]'
-                $candidates=@()
+                $choices=@()
                 for($j=0;$j-lt$n;$j++){
                   $raw=Norm (MenuText $sub $j)
                   $id=[B20N]::GetMenuItemID($sub,$j)
                   $child=[B20N]::GetSubMenu($sub,$j)
-                  $dump.Add("Index=$j Name=[$raw] Id=$id Child=$child")
+                  $dump.Add("ANALYZE Index=$j Name=[$raw] Id=$id Child=$child")
                   if($child-eq[IntPtr]::Zero -and $id-ne[uint32]0xFFFFFFFF){
                     if($raw -match '(?i)^Analyze( Position| Current Position)?$' -or
-                       ($raw -match '(?i)Analyze' -and $raw -notmatch '(?i)Level|Session|Match|Game|Batch|Mark')){
-                      $candidates += [pscustomobject]@{Name=$raw;Id=$id}
+                       ($raw -match '(?i)Analyze' -and $raw -notmatch '(?i)Level|Session|Match|Game|Batch|Mark|Statistics')){
+                      $choices += [pscustomobject]@{Name=$raw;Id=$id}
                     }
                   }
                 }
                 $dump|Out-File "$env:GITHUB_WORKSPACE\analyze-menu.txt" -Encoding utf8
-                if($candidates.Count-ge1){return $candidates[0]}
+                if($choices.Count-ge1){return $choices[0]}
               }
             }
+            $dump|Out-File "$env:GITHUB_WORKSPACE\analyze-menu.txt" -Encoding utf8
             return $null
-          }
-
-          # Dismiss Quick Start using stable v26 behavior.
-          $startDlg=$null;$tip=$null
-          for($i=0;$i-lt60;$i++){
-            Start-Sleep -Milliseconds 500
-            $startDlg=DescWin 'eXtreme Gammon' 'TStartDlg' 'eXtremeGammon2'
-            if($startDlg){$tip=FindNC $startDlg 'Show Tip of the day at startup' 'TCheckBox';if($tip){break}}
-          }
-          if($startDlg){
-            [N]::SetForegroundWindow([IntPtr]$startDlg.Current.NativeWindowHandle)|Out-Null
-            Start-Sleep -Milliseconds 200
-            [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
-            Start-Sleep 1
           }
 
           $out="$env:GITHUB_WORKSPACE\xg-batch20"
@@ -176,18 +134,19 @@ jobs:
           $xgids=Get-Content "$env:GITHUB_WORKSPACE\data\xgids20.txt"|Where-Object{$_.Trim()}
           if($xgids.Count-ne20){throw "Expected 20 XGIDs, got $($xgids.Count)"}
 
-          $driverReport=Join-Path $out 'driver.jsonl'
-          Remove-Item $driverReport -ErrorAction SilentlyContinue
-
           $xg.Refresh()
           $hwnd=[IntPtr]$xg.MainWindowHandle
           $cmd=FindAnalyzeCommand $hwnd
+
           if($null-eq$cmd){
-            @{status='ANALYZE_COMMAND_NOT_PROVEN';menu_dump='analyze-menu.txt'}|ConvertTo-Json -Compress|Out-File $driverReport -Append
-            throw 'Analyze command could not be identified safely; see analyze-menu.txt'
+            @{status='ANALYZE_COMMAND_NOT_PROVEN'}|ConvertTo-Json -Compress|Out-File (Join-Path $out 'driver.jsonl')
+            DumpUI $xg.Id (Join-Path $out 'frontier-ui.txt')
+            Shot (Join-Path $out 'frontier-screen.png')
+            throw 'Analyze command could not be identified safely; inspect analyze-menu.txt'
           }
 
-          "ANALYZE_COMMAND=[$($cmd.Name)] ID=$($cmd.Id)"|Out-File "$out\analyze-command.txt"
+          "ANALYZE_COMMAND=[$($cmd.Name)] ID=$($cmd.Id)"|Out-File (Join-Path $out 'analyze-command.txt')
+          Remove-Item (Join-Path $out 'driver.jsonl') -ErrorAction SilentlyContinue
 
           $k=0
           foreach($xgid in $xgids){
@@ -198,42 +157,38 @@ jobs:
 
             Set-Clipboard -Value $xgid
             [B20N]::SetForegroundWindow($hwnd)|Out-Null
-            Start-Sleep -Milliseconds 250
+            Start-Sleep -Milliseconds 300
             [System.Windows.Forms.SendKeys]::SendWait('^v')
             Start-Sleep 2
             $xg.Refresh()
-            $titleBefore=[string]$xg.MainWindowTitle
-            $imported=($titleBefore -like '*Position.xgp*')
+            $imported=([string]$xg.MainWindowTitle -like '*Position.xgp*')
 
-            $status='IMPORTED'
+            $status='IMPORT_FAILED'
             if($imported){
               [void][B20N]::SendMessage($hwnd,0x0111,[IntPtr]([int]$cmd.Id),[IntPtr]::Zero)
               $status='ANALYZE_SENT'
               Start-Sleep 12
-            }else{
-              $status='IMPORT_FAILED'
             }
 
             DumpUI $xg.Id (Join-Path $dir 'ui.txt')
             Shot (Join-Path $dir 'screen.png')
             $xg.Refresh()
-            $rec=[ordered]@{
+            [ordered]@{
               index=$k
               xgid=$xgid
               imported=$imported
               analyze_command=$cmd.Name
               status=$status
               title=[string]$xg.MainWindowTitle
-            }
-            $rec|ConvertTo-Json -Compress|Out-File $driverReport -Append
+            }|ConvertTo-Json -Compress|Out-File (Join-Path $out 'driver.jsonl') -Append
           }
 
           Get-Process|Where-Object{$_.ProcessName-match'^eXtremeGammon2$|^test3d$'}|Stop-Process -Force -ErrorAction SilentlyContinue
           '@
-          $batch=$batch -replace '(?m)^          ',''
 
-          $ps1=Join-Path $env:RUNNER_TEMP 'xg-batch20-v1.ps1'
-          Set-Content $ps1 ($prefix+$throughWizard+$throughRegistration+$batch) -Encoding UTF8
+          $batch=$batch -replace '(?m)^          ',''
+          $ps1=Join-Path $env:RUNNER_TEMP 'xg-batch20-public-v2.ps1'
+          Set-Content $ps1 ($prefix+$batch) -Encoding UTF8
           & $ps1
 
       - name: Parse accessible candidate text
@@ -243,9 +198,8 @@ jobs:
           from pathlib import Path
           import re, json, csv
           root=Path("xg-batch20")
+          root.mkdir(parents=True, exist_ok=True)
           rows=[]
-          # Conservative parser: only emits rows when an accessible UI text line
-          # contains an equity-like token and a backgammon move pattern.
           move_re=re.compile(r'(?i)(Bar/\d+|\d+/(?:\d+|Off))(?:\*|\(\d+\))?(?:\s+(?:Bar/\d+|\d+/(?:\d+|Off))(?:\*|\(\d+\))?){0,3}')
           eq_re=re.compile(r'(?i)(?:eq(?:uity)?\s*[:=]?\s*)([+-]?\d+(?:\.\d+)?)')
           for d in sorted(root.glob("position_*")):
@@ -255,24 +209,25 @@ jobs:
                   mm=move_re.search(line); ee=eq_re.search(line)
                   if mm and ee:
                       found.append({"move":mm.group(0),"equity":float(ee.group(1))})
-              # de-dup exact move/equity pairs
-              uniq=[]
-              seen=set()
+              uniq=[]; seen=set()
               for x in found:
                   key=(x["move"],x["equity"])
                   if key not in seen:
                       seen.add(key); uniq.append(x)
-              rec={"position":d.name,"candidate_count":len(uniq),"candidates":uniq[:20],
-                   "status":"TOP5_ACCESSIBLE" if len(uniq)>=5 else "EXTRACTION_FRONTIER"}
-              rows.append(rec)
+              rows.append({
+                  "position":d.name,
+                  "candidate_count":len(uniq),
+                  "candidates":uniq[:20],
+                  "status":"TOP5_ACCESSIBLE" if len(uniq)>=5 else "EXTRACTION_FRONTIER"
+              })
           (root/"parsed_candidates.json").write_text(json.dumps(rows,indent=2))
           with (root/"parsed_top5.csv").open("w",newline="") as f:
-              w=csv.writer(f);w.writerow(["position","rank","move","equity","status"])
+              w=csv.writer(f); w.writerow(["position","rank","move","equity","status"])
               for r in rows:
                   for i,c in enumerate(r["candidates"][:5],1):
                       w.writerow([r["position"],i,c["move"],c["equity"],r["status"]])
           summary={
-              "positions":len(rows),
+              "positions_captured":len(rows),
               "positions_with_accessible_top5":sum(r["status"]=="TOP5_ACCESSIBLE" for r in rows),
               "positions_at_extraction_frontier":sum(r["status"]=="EXTRACTION_FRONTIER" for r in rows),
               "claim":"No XG Top-5 parity claim unless positions_with_accessible_top5 == 20."
@@ -284,7 +239,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: xg-batch-20-v1
+          name: xg-batch-20-public-v2
           path: |
             xg-install.log
             xg-batch20-bootstrap-report.txt
