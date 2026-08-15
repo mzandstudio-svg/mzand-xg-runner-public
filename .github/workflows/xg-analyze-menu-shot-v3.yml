@@ -1,0 +1,41 @@
+name: XG Analyze Menu Shot V3
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-analyze-menu-shot-v3.yml
+      - tools/xg-analyze-menu-shot-v3/**
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shot:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append
+      - name: Capture Analyze menu screenshot
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-analyze-menu-shot-v3-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-analyze-menu-shot-v3\RUN_MENU_SHOT.ps1" -ExePath $env:XG_EXE -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-analyze-level-dump-v1\cases.json" -OutDir $out
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-analyze-menu-shot-v3
+          path: xg-analyze-menu-shot-v3-out/**
+          if-no-files-found: error
+          retention-days: 14
