@@ -20,52 +20,41 @@ function InvokeOnePly(){
 }
 '@
 $new=@'
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class MZWinClose {
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls,string title);
+ [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
+ [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+}
+"@ -ErrorAction SilentlyContinue
 function FindRegistrationAny(){
  $root=[System.Windows.Automation.AutomationElement]::RootElement
  $wins=$root.FindAll([System.Windows.Automation.TreeScope]::Children,[System.Windows.Automation.Condition]::TrueCondition)
  foreach($w in $wins){try{if([string]$w.Current.Name -eq 'Registration'){return $w}}catch{}}
  return $null
 }
-function ClickElementCenter($el){
- if($null -eq $el){return $false}
- try{
-   $r=$el.Current.BoundingRectangle
-   if($r.Width -le 0 -or $r.Height -le 0){return $false}
-   [System.Windows.Forms.Cursor]::Position=New-Object System.Drawing.Point([int]($r.X+$r.Width/2),[int]($r.Y+$r.Height/2))
-   Start-Sleep -Milliseconds 120
-   Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class MZMouse {
- [DllImport("user32.dll")] public static extern void mouse_event(uint f,uint dx,uint dy,uint d,UIntPtr e);
-}
-"@ -ErrorAction SilentlyContinue
-   [MZMouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero);Start-Sleep -Milliseconds 80;[MZMouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
-   return $true
- }catch{return $false}
-}
 function ForceCloseRegistration(){
- for($mz=0;$mz -lt 10;$mz++){
+ for($mz=0;$mz -lt 12;$mz++){
    [void](DismissRegistration 1)
    $reg=FindRegistrationAny
-   if($null -eq $reg){return $true}
-   $close=$reg.FindFirst([System.Windows.Automation.TreeScope]::Descendants,(New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'Close')))
-   if($null -ne $close){
-     try{$close.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}catch{[void](ClickElementCenter $close)}
+   $hw=[MZWinClose]::FindWindow($null,'Registration')
+   if($null -eq $reg -and $hw -eq [IntPtr]::Zero){return $true}
+   if($hw -ne [IntPtr]::Zero){
+     [MZWinClose]::SetForegroundWindow($hw)|Out-Null
+     [MZWinClose]::PostMessage($hw,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)|Out-Null
      Start-Sleep -Milliseconds 700
    }
    $reg=FindRegistrationAny
-   if($null -eq $reg){return $true}
-   try{[D2N]::SetForegroundWindow([IntPtr]$reg.Current.NativeWindowHandle)|Out-Null}catch{}
-   Start-Sleep -Milliseconds 120
-   try{[System.Windows.Forms.SendKeys]::SendWait('{ESC}')}catch{}
-   Start-Sleep -Milliseconds 400
-   if($null -ne (FindRegistrationAny)){
-     try{[System.Windows.Forms.SendKeys]::SendWait('%{F4}')}catch{}
-     Start-Sleep -Milliseconds 500
+   if($null -eq $reg -and [MZWinClose]::FindWindow($null,'Registration') -eq [IntPtr]::Zero){return $true}
+   if($null -ne $reg){
+     $close=$reg.FindFirst([System.Windows.Automation.TreeScope]::Descendants,(New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'Close')))
+     if($null -ne $close){try{$close.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()}catch{}}
+     Start-Sleep -Milliseconds 600
    }
  }
- return ($null -eq (FindRegistrationAny))
+ return ($null -eq (FindRegistrationAny) -and [MZWinClose]::FindWindow($null,'Registration') -eq [IntPtr]::Zero)
 }
 function InvokeOnePly(){
  [void](DismissSave 1)
@@ -81,7 +70,7 @@ function InvokeOnePly(){
    if(Test-Path $fatal){throw ('Frida fatal before ready: '+(Get-Content $fatal -Raw))}
    if(-not(Test-Path $ready)){throw 'Frida hook did not become ready within 150s'}
  }
- if(-not(ForceCloseRegistration)){throw 'Registration modal still present after cross-process close attempts'}
+ if(-not(ForceCloseRegistration)){throw 'Registration modal still present after Win32 close attempts'}
  [void](DismissSave 1)
  FocusXg
  [System.Windows.Forms.SendKeys]::SendWait('^1')
