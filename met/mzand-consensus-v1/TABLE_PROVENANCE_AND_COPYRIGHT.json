@@ -1,0 +1,65 @@
+[
+  {
+    "table_name": "GnuBG 11 point",
+    "filename": "GnuBG 11 point.met",
+    "match_point": 25,
+    "version": "1.0",
+    "copyright": "© 2003-2004 Robert-Jan Veldhuizen (Zorba)",
+    "redistribution": "PUBLIC_WITH_ORIGINAL_NOTICE_PRESERVED",
+    "original_sha256": "0cb191ffb961852965123392f503b20324d267a6205bfd94d524c19db443a078"
+  },
+  {
+    "table_name": "Jacobs & Trice",
+    "filename": "Jacobs & Trice.met",
+    "match_point": 25,
+    "version": "1.0",
+    "copyright": "© 1996 J. Jacobs & W. Trice",
+    "redistribution": "PUBLIC_WITH_ORIGINAL_NOTICE_PRESERVED",
+    "original_sha256": "ce4277f30f761166e6e008a0c3167994a504de56fea4e506b2f25359fe10fc8f"
+  },
+  {
+    "table_name": "Kazaross XG2",
+    "filename": "Kazaross XG2.met",
+    "match_point": 25,
+    "version": "1.00",
+    "copyright": "© 2011 Neil Kazaross",
+    "redistribution": "PUBLIC_WITH_ORIGINAL_NOTICE_PRESERVED",
+    "original_sha256": "dcb63006b1fd1146f3ed900625505b741c3bbf90edd72ff73fb792f06a7917fb"
+  },
+  {
+    "table_name": "Rockwell-Kazaross",
+    "filename": "Rockwell-Kazaross.met",
+    "match_point": 25,
+    "version": "1.00",
+    "copyright": "© 2010 David Rockwell & Neil Kazaross",
+    "redistribution": "PUBLIC_WITH_ORIGINAL_NOTICE_PRESERVED",
+    "original_sha256": "6689f197a73463c321d35f6108f3343ce829cf5b804a2e9555742980b49f7c32"
+  },
+  {
+    "table_name": "Snowie",
+    "filename": "Snowie.met",
+    "match_point": 15,
+    "version": "2.1",
+    "copyright": "© 1999 Oasya",
+    "redistribution": "PUBLIC_WITH_ORIGINAL_NOTICE_PRESERVED",
+    "original_sha256": "9a8a4b4aa7a61e6644e313d7fd52ef20b3ddf872976127210d6fce7f667031e0"
+  },
+  {
+    "table_name": "Kit Woolsey",
+    "filename": "Woolsey.met",
+    "match_point": 15,
+    "version": "1.0",
+    "copyright": "© 1993 Kit Woolsey",
+    "redistribution": "PUBLIC_WITH_ORIGINAL_NOTICE_PRESERVED",
+    "original_sha256": "0a87489947e46ca3e206a62608cdd7eb3f9d48f40ab3c4cf9f41b9e806f7982b"
+  },
+  {
+    "table_name": "MZand Consensus 25-point",
+    "filename": "MZand Consensus 25-point.met",
+    "match_point": 25,
+    "version": "1.0",
+    "copyright": "© 2026 MZand Studio (consensus arrangement/generator/packaging only)",
+    "redistribution": "MZAND_GENERATED_PUBLIC_ARTIFACT; source-table rights remain with their respective owners",
+    "original_sha256": "ee2dad8fb9c435763d4ed12f1d2261b6a679c05fab6a3940212fc89764fe4696"
+  }
+]
