@@ -1,0 +1,53 @@
+name: XG Analyze Menu Dump V2
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-analyze-menu-dump-v2.yml
+      - tools/xg-analyze-menu-dump-v2/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append
+      - name: Dump Analyze menu after closing normal Registration dialog
+        id: cap
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-analyze-menu-v2-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-analyze-menu-dump-v2\RUN_MENU_DUMP.ps1" -ExePath $env:XG_EXE -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-analyze-level-dump-v1\cases.json" -OutDir $out
+      - name: Report
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-analyze-menu-v2-out'
+          @('XG_ANALYZE_MENU_DUMP_V2',"CAPTURE_OUTCOME=${{ steps.cap.outcome }}",'PURPOSE=UI interoperability diagnostic only','TRAINING_ELIGIBLE=False')|Out-File (Join-Path $out 'RUN_REPORT.txt') -Encoding utf8
+          if(Test-Path (Join-Path $out 'analyze-menu-ui.txt')){Get-Content (Join-Path $out 'analyze-menu-ui.txt')|Select-String -Pattern 'Analyze|ply|Roller|Level|Move|Cube|Preset'}
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-analyze-menu-dump-v2
+          path: xg-analyze-menu-v2-out/**
+          if-no-files-found: error
+          retention-days: 14
