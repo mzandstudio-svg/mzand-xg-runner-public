@@ -18,16 +18,16 @@ $hookLog=Join-Path $env:NIP_HOOK_OUT 'hook-stdout.txt'
 $hookErr=Join-Path $env:NIP_HOOK_OUT 'hook-stderr.txt'
 $hp=Start-Process python -ArgumentList @($env:NIP_HOOK,[string]$xg.Id) -PassThru -RedirectStandardOutput $hookLog -RedirectStandardError $hookErr
 $ready=Join-Path $env:NIP_HOOK_OUT 'READY';$fatal=Join-Path $env:NIP_HOOK_OUT 'FATAL'
-$deadline=(Get-Date).AddSeconds(35)
+$deadline=(Get-Date).AddSeconds(150)
 while((Get-Date) -lt $deadline -and -not(Test-Path $ready) -and -not(Test-Path $fatal)){Start-Sleep -Milliseconds 250}
 if(Test-Path $fatal){throw ('Frida fatal before ready: '+(Get-Content $fatal -Raw))}
-if(-not(Test-Path $ready)){throw 'Frida hook did not become ready'}
+if(-not(Test-Path $ready)){throw 'Frida hook did not become ready within 150s'}
 '@
 $src=$src.Replace($needle,$needle+$inject)
-# Give the hook a few seconds after both duplicated START analyses before XG is killed.
+# Give the hook time after both duplicated START analyses before XG is killed.
 $killNeedle="Get-Process eXtremeGammon2,test3d -ErrorAction SilentlyContinue|Stop-Process -Force -ErrorAction SilentlyContinue"
 $killInject=@'
-$done=Join-Path $env:NIP_HOOK_OUT 'DONE';$deadline=(Get-Date).AddSeconds(12)
+$done=Join-Path $env:NIP_HOOK_OUT 'DONE';$deadline=(Get-Date).AddSeconds(30)
 while((Get-Date) -lt $deadline -and -not(Test-Path $done)){Start-Sleep -Milliseconds 250}
 '@
 if(-not $src.Contains($killNeedle)){throw 'capture kill anchor missing'}
