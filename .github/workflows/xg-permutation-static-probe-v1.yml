@@ -1,0 +1,44 @@
+name: XG Permutation Static Probe V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-permutation-static-probe-v1.yml
+      - tools/xg-permutation-static-probe-v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "install failed $($p.ExitCode)"}
+      - name: Scan installed XG for permutation tables
+        shell: powershell
+        run: |
+          $root='C:\Program Files (x86)\eXtreme Gammon 2'
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-permutation-static-out';New-Item -ItemType Directory -Force -Path $out|Out-Null
+          python "$env:GITHUB_WORKSPACE\tools\xg-permutation-static-probe-v1\scan_permutations.py" $root $out
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-permutation-static-probe-v1
+          path: |
+            xg-permutation-static-out/**
+            xg-install.log
+          if-no-files-found: error
+          retention-days: 14
