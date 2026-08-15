@@ -70,10 +70,17 @@ function InvokeOnePly(){
    if(Test-Path $fatal){throw ('Frida fatal before ready: '+(Get-Content $fatal -Raw))}
    if(-not(Test-Path $ready)){throw 'Frida hook did not become ready within 150s'}
  }
- if(-not(ForceCloseRegistration)){throw 'Registration modal still present after Win32 close attempts'}
+ if(-not(ForceCloseRegistration)){throw 'Registration modal still present before Ctrl+1'}
  [void](DismissSave 1)
- FocusXg
- [System.Windows.Forms.SendKeys]::SendWait('^1')
+ for($try=0;$try -lt 3;$try++){
+   FocusXg
+   [System.Windows.Forms.SendKeys]::SendWait('^1')
+   Start-Sleep -Milliseconds 900
+   $postPrompt=($null -ne (FindRegistrationAny)) -or ([MZWinClose]::FindWindow($null,'Registration') -ne [IntPtr]::Zero)
+   if(-not $postPrompt){break}
+   if(-not(ForceCloseRegistration)){throw 'Registration modal still present after Ctrl+1'}
+   Start-Sleep -Milliseconds 500
+ }
 }
 '@
 if(-not $src.Contains($old)){throw 'InvokeOnePly anchor missing'}
