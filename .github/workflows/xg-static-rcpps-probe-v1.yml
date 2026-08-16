@@ -1,0 +1,56 @@
+name: XG Static RCPPS Probe V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-static-rcpps-probe-v1.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG exe missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append
+      - name: Extract only reciprocal-instruction disassembly contexts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-static-rcpps-out';New-Item -ItemType Directory -Force -Path $out|Out-Null
+          $od=(Get-Command objdump.exe -ErrorAction SilentlyContinue).Source
+          if(-not $od){$candidate='C:\Program Files\Git\mingw64\bin\objdump.exe';if(Test-Path $candidate){$od=$candidate}}
+          if(-not $od){throw 'objdump not found'}
+          $dis=Join-Path $env:RUNNER_TEMP 'xg-disasm.txt'
+          & $od -d -Mintel $env:XG_EXE | Out-File $dis -Encoding ascii
+          $hits=Select-String -Path $dis -Pattern '\brcpps\b|\brcpss\b' -Context 36,36
+          @('XG_STATIC_RCPPS_PROBE_V1',"OBJDUMP=$od","RCP_CONTEXT_BLOCKS=$($hits.Count)") | Out-File (Join-Path $out 'SUMMARY.txt') -Encoding utf8
+          $hits | ForEach-Object {
+            '============================================================'
+            "MATCH_LINE=$($_.LineNumber) $($_.Line)"
+            $_.Context.PreContext
+            $_.Line
+            $_.Context.PostContext
+          } | Out-File (Join-Path $out 'rcp-context.txt') -Encoding utf8
+          Get-Content (Join-Path $out 'SUMMARY.txt')
+      - name: Upload evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-static-rcpps-probe-v1
+          path: xg-static-rcpps-out/**
+          if-no-files-found: error
+          retention-days: 14
