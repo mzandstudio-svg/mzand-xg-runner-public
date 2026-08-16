@@ -14,6 +14,7 @@ jobs:
   capture:
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         include:
           - {case_id: START_A, xgid: 'XGID=-b----E-C---eE---c-e----B-:0:0:1:00:0:0:3:0:10'}
@@ -39,7 +40,7 @@ jobs:
           Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
           $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
           if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
-          $root='C:\Program Files (x86)\eXtreme Gammon 2';$e=Join-Path $root 'eXtremeGammon2.exe';$m=Join-Path $root 'eXtreme Gammon v2.dat'
+          $root='C:\Program Files (x86)\eXtreme Gammon 2';$e=Join-Path $root 'eXtremeGammon2.exe';$m=Join-Path $root 'eXtremeGammon v2.dat'
           if(-not(Test-Path $e)){throw 'XG exe missing'};if(-not(Test-Path $m)){throw 'XG model missing'}
           "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append;"XG_MODEL=$m"|Out-File $env:GITHUB_ENV -Append
       - name: Create isolated case
@@ -57,7 +58,7 @@ jobs:
           $out=Join-Path $env:GITHUB_WORKSPACE 'xg-dispatch-v3-out'
           New-Item -ItemType Directory -Force -Path $out|Out-Null
           & "$env:GITHUB_WORKSPACE\tools\xg-nn-allnet-input-v1\RUN_ALLNET.ps1" -ExePath $env:XG_EXE -ModelPath $env:XG_MODEL -CasesPath "$env:RUNNER_TEMP\case.json" -OutDir $out
-      - name: Print active network
+      - name: Print descriptors
         if: always()
         shell: powershell
         run: |
@@ -65,9 +66,7 @@ jobs:
           Get-ChildItem $out -Recurse -Filter allnet.json -ErrorAction SilentlyContinue | ForEach-Object {
             $j=Get-Content $_.FullName -Raw|ConvertFrom-Json
             foreach($r in $j.records){
-              if(($r.output_values|Where-Object{[math]::Abs([double]$_)-gt 1e-12}).Count -gt 0){
-                "ACTIVE_NETWORK=$($r.network) OBJECT=$($r.object)"
-              }
+              "DESCRIPTOR network=$($r.network) object=$($r.object) out=$($r.output_values -join ',')"
             }
           }
           if(Test-Path (Join-Path $out 'capture-status.jsonl')){Get-Content (Join-Path $out 'capture-status.jsonl')}
