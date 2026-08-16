@@ -1,0 +1,59 @@
+name: XG NN Hidden Probe V1
+
+on:
+  push:
+    branches: [mzand-xg-public-runner-fix]
+    paths:
+      - .github/workflows/xg-nn-hidden-probe-v1.yml
+      - tools/xg-nn-hidden-probe-v1/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install current official XG
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "install failed $($p.ExitCode)"}
+          $root='C:\Program Files (x86)\eXtreme Gammon 2';$e=Join-Path $root 'eXtremeGammon2.exe';$m=Join-Path $root 'eXtremeGammon v2.dat'
+          if(-not(Test-Path $e)){throw 'XG exe missing'};if(-not(Test-Path $m)){throw 'XG model missing'}
+          "XG_EXE=$e"|Out-File $env:GITHUB_ENV -Append;"XG_MODEL=$m"|Out-File $env:GITHUB_ENV -Append
+      - name: Capture hidden layers for B C D
+        id: cap
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-hidden-out'
+          New-Item -ItemType Directory -Force -Path $out|Out-Null
+          & "$env:GITHUB_WORKSPACE\tools\xg-nn-hidden-probe-v1\RUN_HIDDEN.ps1" -ExePath $env:XG_EXE -ModelPath $env:XG_MODEL -CasesPath "$env:GITHUB_WORKSPACE\tools\xg-nn-allnet-input-v1\cases.json" -OutDir $out
+      - name: Summarize active descriptors
+        if: always()
+        shell: powershell
+        run: |
+          $out=Join-Path $env:GITHUB_WORKSPACE 'xg-hidden-out'
+          Get-ChildItem $out -Recurse -Filter allnet.json -ErrorAction SilentlyContinue | ForEach-Object {
+            $j=Get-Content $_.FullName -Raw|ConvertFrom-Json
+            foreach($r in $j.records){
+              if(($r.output_values|Where-Object{[math]::Abs([double]$_)-gt 1e-12}).Count -gt 0){
+                "ACTIVE network=$($r.network) object=$($r.object) hidden_pre=$($r.hidden_pre_values.Count) hidden_act=$($r.hidden_act_values.Count) out=$($r.output_values -join ',')"
+              }
+            }
+          }
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xg-nn-hidden-probe-v1
+          path: xg-hidden-out/**
+          if-no-files-found: error
+          retention-days: 14
