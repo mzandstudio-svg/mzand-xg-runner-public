@@ -9,6 +9,14 @@ on:
       - scripts/xg-analyze-win32-v3.ps1
       - scripts/xg-export-clipboard-v13.ps1
       - scripts/parse_xg_position_export.py
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/gt722-xg-reference-v1.yml
+      - scripts/compare_gt722_xg_labels.py
+      - scripts/xg-analyze-win32-v3.ps1
+      - scripts/xg-export-clipboard-v13.ps1
+      - scripts/parse_xg_position_export.py
   workflow_dispatch:
 
 permissions:
