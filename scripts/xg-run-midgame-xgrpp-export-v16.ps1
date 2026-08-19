@@ -2,6 +2,32 @@ $ErrorActionPreference='Stop'
 $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-run-midgame-xgrpp-export-v15.ps1'
 $src=Get-Content $srcPath -Raw
 
+$oldExport=@'
+function ExportText(){
+  $xg.Refresh(); [V15N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null; Start-Sleep -Milliseconds 250
+  [System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 700
+  try{return [string](Get-Clipboard -Raw -TextFormatType Text)}catch{return [string](Get-Clipboard -Raw)}
+}
+'@
+$newExport=@'
+function ExportText(){
+  $xg.Refresh(); [V15N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null; Start-Sleep -Milliseconds 250
+  # XG copies only the bare XGID while the board/editor owns focus. Select the
+  # first analyzed move row before Ctrl+C so the clipboard contains the full
+  # structured Top-N analysis. Coordinates are main-window relative and match
+  # the same first-row anchor already used by the historical XGR++ runner.
+  $focusRect=New-Object V15N+RECT
+  if([V15N]::GetWindowRect([IntPtr]$xg.MainWindowHandle,[ref]$focusRect)){
+    LeftClick ($focusRect.Left+130) ($focusRect.Top+364)
+    Start-Sleep -Milliseconds 300
+  }
+  [System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 700
+  try{return [string](Get-Clipboard -Raw -TextFormatType Text)}catch{return [string](Get-Clipboard -Raw)}
+}
+'@
+if(-not$src.Contains($oldExport)){throw 'v15 ExportText block not found'}
+$src=$src.Replace($oldExport,$newExport)
+
 $old=@'
 $baseline=ExportText
 Set-Content "$env:GITHUB_WORKSPACE\xg-v15-before-xgrpp.txt" $baseline -Encoding UTF8
