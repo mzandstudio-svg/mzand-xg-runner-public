@@ -14,14 +14,8 @@ function InvokeAutomationNo([System.Windows.Automation.AutomationElement]$dialog
     $c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'No')
     $b=$dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$c)
     if($null-eq$b){return $false}
-    try{
-      $p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-      if($null-ne$p){$p.Invoke();Start-Sleep -Milliseconds 700;return $true}
-    }catch{}
-    try{
-      $r=$b.Current.BoundingRectangle
-      if($r.Width-gt0 -and $r.Height-gt0){LeftClick ([int]($r.X+$r.Width/2)) ([int]($r.Y+$r.Height/2));Start-Sleep -Milliseconds 700;return $true}
-    }catch{}
+    try{$p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern);if($null-ne$p){$p.Invoke();Start-Sleep -Milliseconds 700;return $true}}catch{}
+    try{$r=$b.Current.BoundingRectangle;if($r.Width-gt0 -and $r.Height-gt0){LeftClick ([int]($r.X+$r.Width/2)) ([int]($r.Y+$r.Height/2));Start-Sleep -Milliseconds 700;return $true}}catch{}
   }catch{}
   return $false
 }
@@ -40,10 +34,7 @@ $newExport=@'
 function ExportText(){
   $xg.Refresh(); [V15N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null; Start-Sleep -Milliseconds 250
   $focusRect=New-Object V15N+RECT
-  if([V15N]::GetWindowRect([IntPtr]$xg.MainWindowHandle,[ref]$focusRect)){
-    LeftClick ($focusRect.Left+130) ($focusRect.Top+364)
-    Start-Sleep -Milliseconds 300
-  }
+  if([V15N]::GetWindowRect([IntPtr]$xg.MainWindowHandle,[ref]$focusRect)){LeftClick ($focusRect.Left+130) ($focusRect.Top+364);Start-Sleep -Milliseconds 300}
   [System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 700
   try{return [string](Get-Clipboard -Raw -TextFormatType Text)}catch{return [string](Get-Clipboard -Raw)}
 }
@@ -54,10 +45,7 @@ function ForceSaveGameNo(){
     foreach($e in $all){
       try{
         if([string]$e.Current.Name-eq'No' -and $e.Current.ProcessId-eq$xg.Id -and $e.Current.IsEnabled){
-          try{
-            $p=$e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-            if($null-ne$p){$p.Invoke();Start-Sleep 1;return $true}
-          }catch{}
+          try{$p=$e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern);if($null-ne$p){$p.Invoke();Start-Sleep 1;return $true}}catch{}
           $r=$e.Current.BoundingRectangle
           if($r.Width-gt0 -and $r.Height-gt0){LeftClick ([int]($r.X+$r.Width/2)) ([int]($r.Y+$r.Height/2));Start-Sleep 1;return $true}
         }
@@ -78,12 +66,12 @@ Start-Sleep 20
 $newDelayed=@'
 $saveDismissed=DismissDelayedSaveGame
 if($saveDismissed){
-  Post 'xg-public-v15/delayed-save-dismissed' 'success' 'Delayed Save Game prompt dismissed with No'
-  & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
+  # Choosing No completes the pending transition. Re-pasting here would create
+  # the same Save Game prompt again. Continue on the transitioned position.
+  Post 'xg-public-v15/delayed-save-dismissed' 'success' 'Delayed Save Game prompt dismissed with No; no repaste'
   $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
-  $xg.Refresh()
-  InvokeAnalyzePosition
-  Post 'xg-public-v15/midgame-analyze-reissued' 'success' 'target XGID repasted; Analyze Position reissued'
+  $xg.Refresh();Start-Sleep 1;InvokeAnalyzePosition
+  Post 'xg-public-v15/midgame-analyze-reissued' 'success' 'Analyze Position reissued after completed transition'
 }
 Start-Sleep 20
 '@
@@ -118,17 +106,24 @@ for($baselineAttempt=1;$baselineAttempt-le3;$baselineAttempt++){
     $forced=ForceSaveGameNo
     "BASELINE_ATTEMPT_${baselineAttempt}_FORCE_NO: $forced"|Out-File $report15 -Append
     if(-not$forced){throw 'Save Game prompt detected but UI Automation could not invoke No'}
-    Post 'xg-public-v16/save-prompt-no-invoked' 'success' "Save Game No invoked on baseline attempt $baselineAttempt"
+    Post 'xg-public-v16/save-prompt-no-invoked' 'success' "Save Game No invoked on baseline attempt $baselineAttempt; no repaste"
+    # The pending paste/action continues after No. Do not paste again: that is
+    # what caused the prior infinite Save Game loop.
+    $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+    $xg.Refresh();Start-Sleep 2;InvokeAnalyzePosition
+    Post 'xg-public-v16/midgame-analyze-after-no' 'success' "Analyze Position reissued after Save Game No"
   }else{
     $retryDismissed=DismissDelayedSaveGame
     "BASELINE_ATTEMPT_${baselineAttempt}_SAVE_DISMISSED: $retryDismissed"|Out-File $report15 -Append
+    if($retryDismissed){$xg.Refresh();Start-Sleep 1;InvokeAnalyzePosition}
+    else{
+      # No dialog was found and no structured export exists: only then perform a
+      # fresh bounded target paste, followed by Analyze.
+      & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
+      $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+      $xg.Refresh();InvokeAnalyzePosition
+    }
   }
-
-  & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
-  $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
-  $xg.Refresh()
-  InvokeAnalyzePosition
-  Post 'xg-public-v16/midgame-analyze-retry' 'success' "target repasted; baseline attempt $baselineAttempt reissued Analyze Position"
   Start-Sleep 20
   Shot "$env:GITHUB_WORKSPACE\xg-v16-baseline-retry-${baselineAttempt}.png"
 }
@@ -137,9 +132,7 @@ Set-Content "$env:GITHUB_WORKSPACE\xg-v15-before-xgrpp.txt" $baseline -Encoding 
 "BASELINE_CLIPBOARD_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
 if($env:MZAND_XG_BASELINE_ONLY-eq'1'){
   if($baseline.Length-le100 -or $baseline.Trim().StartsWith('XGID=') -or $baseline -match '(?is)\[Window Title\]\s*Save Game'){throw 'No structured baseline export after bounded retries'}
-}else{
-  if(-not$beforeSource){throw 'Could not parse baseline top candidate source after 3 bounded analysis retries'}
-}
+}else{if(-not$beforeSource){throw 'Could not parse baseline top candidate source after 3 bounded analysis retries'}}
 '@
 if(-not$src.Contains($old)){throw 'v15 baseline block not found'}
 $patched=$src.Replace($old,$new)
