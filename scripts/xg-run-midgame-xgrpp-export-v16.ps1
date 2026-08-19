@@ -39,10 +39,6 @@ function ExportText(){
 $newExport=@'
 function ExportText(){
   $xg.Refresh(); [V15N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null; Start-Sleep -Milliseconds 250
-  # XG copies only the bare XGID while the board/editor owns focus. Select the
-  # first analyzed move row before Ctrl+C so the clipboard contains the full
-  # structured Top-N analysis. Coordinates are main-window relative and match
-  # the same first-row anchor already used by the historical XGR++ runner.
   $focusRect=New-Object V15N+RECT
   if([V15N]::GetWindowRect([IntPtr]$xg.MainWindowHandle,[ref]$focusRect)){
     LeftClick ($focusRect.Left+130) ($focusRect.Top+364)
@@ -50,6 +46,25 @@ function ExportText(){
   }
   [System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 700
   try{return [string](Get-Clipboard -Raw -TextFormatType Text)}catch{return [string](Get-Clipboard -Raw)}
+}
+function ForceSaveGameNo(){
+  try{
+    $root=[System.Windows.Automation.AutomationElement]::RootElement
+    $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+    foreach($e in $all){
+      try{
+        if([string]$e.Current.Name-eq'No' -and $e.Current.ProcessId-eq$xg.Id -and $e.Current.IsEnabled){
+          try{
+            $p=$e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+            if($null-ne$p){$p.Invoke();Start-Sleep 1;return $true}
+          }catch{}
+          $r=$e.Current.BoundingRectangle
+          if($r.Width-gt0 -and $r.Height-gt0){LeftClick ([int]($r.X+$r.Width/2)) ([int]($r.Y+$r.Height/2));Start-Sleep 1;return $true}
+        }
+      }catch{}
+    }
+  }catch{}
+  return $false
 }
 '@
 if(-not$src.Contains($oldExport)){throw 'v15 ExportText block not found'}
@@ -64,8 +79,6 @@ $newDelayed=@'
 $saveDismissed=DismissDelayedSaveGame
 if($saveDismissed){
   Post 'xg-public-v15/delayed-save-dismissed' 'success' 'Delayed Save Game prompt dismissed with No'
-  # A delayed Save Game prompt means the target paste was intercepted. Repaste
-  # the requested XGID after dismissal before reissuing Analyze Position.
   & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
   $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
   $xg.Refresh()
@@ -85,7 +98,6 @@ $beforeSource=TopSource $baseline
 "BASELINE_CLIPBOARD_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
 if(-not$beforeSource){throw 'Could not parse baseline top candidate source'}
 '@
-
 $new=@'
 $baseline=''
 $beforeSource=''
@@ -103,21 +115,15 @@ for($baselineAttempt=1;$baselineAttempt-le3;$baselineAttempt++){
   if($beforeSource -or ($env:MZAND_XG_BASELINE_ONLY-eq'1' -and $structuredEnough)){break}
 
   if($savePrompt){
-    # Ctrl+C on a native Save Game message box produces the bracketed text above.
-    # In XG the default focus is Yes and button order is Yes/No/Cancel, so one
-    # Right then Enter chooses No without coordinate assumptions.
-    [System.Windows.Forms.SendKeys]::SendWait('{RIGHT}')
-    Start-Sleep -Milliseconds 200
-    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-    Start-Sleep 1
-    Post 'xg-public-v16/save-prompt-keyboard-dismissed' 'success' "Save Game prompt dismissed on baseline attempt $baselineAttempt"
+    $forced=ForceSaveGameNo
+    "BASELINE_ATTEMPT_${baselineAttempt}_FORCE_NO: $forced"|Out-File $report15 -Append
+    if(-not$forced){throw 'Save Game prompt detected but UI Automation could not invoke No'}
+    Post 'xg-public-v16/save-prompt-no-invoked' 'success' "Save Game No invoked on baseline attempt $baselineAttempt"
   }else{
     $retryDismissed=DismissDelayedSaveGame
     "BASELINE_ATTEMPT_${baselineAttempt}_SAVE_DISMISSED: $retryDismissed"|Out-File $report15 -Append
   }
 
-  # Re-establish the exact requested position on every bounded retry; the parser
-  # later verifies the exported XGID exactly, so a stale prior position cannot pass.
   & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
   $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
   $xg.Refresh()
@@ -135,7 +141,6 @@ if($env:MZAND_XG_BASELINE_ONLY-eq'1'){
   if(-not$beforeSource){throw 'Could not parse baseline top candidate source after 3 bounded analysis retries'}
 }
 '@
-
 if(-not$src.Contains($old)){throw 'v15 baseline block not found'}
 $patched=$src.Replace($old,$new)
 $tmp=Join-Path $env:RUNNER_TEMP 'xg-v16-patched.ps1'
