@@ -83,8 +83,10 @@ jobs:
           python ./scripts/parse_xg_position_export.py ./xg-v15-after-xgrpp.txt ./xg-corpus-label.json
           $x=Get-Content ./xg-corpus-label.json -Raw|ConvertFrom-Json
           if($x.candidate_count-lt1){throw 'no parsed candidates'}
+          if([string]$x.xgid-ne[string]$env:TARGET_XGID){throw "target XGID mismatch: exported=[$($x.xgid)] expected=[$env:TARGET_XGID]"}
           "CASE_ID=$env:CASE_ID"|Out-File ./xg-corpus-summary.txt
           "TARGET_XGID=$env:TARGET_XGID"|Out-File ./xg-corpus-summary.txt -Append
+          "EXPORTED_XGID=$($x.xgid)"|Out-File ./xg-corpus-summary.txt -Append
           "TOP1=$($x.candidates[0].move)"|Out-File ./xg-corpus-summary.txt -Append
           "EQUITY=$($x.candidates[0].equity)"|Out-File ./xg-corpus-summary.txt -Append
           "METHOD=$($x.candidates[0].analysis_method)"|Out-File ./xg-corpus-summary.txt -Append
