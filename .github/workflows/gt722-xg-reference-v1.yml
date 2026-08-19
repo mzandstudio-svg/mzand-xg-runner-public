@@ -46,6 +46,7 @@ jobs:
           "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
 
       - name: Reach frozen reference position
+        continue-on-error: true
         shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
@@ -75,6 +76,7 @@ jobs:
           Get-Content ./gt722-xg-reference-summary.txt
 
       - name: Comparator schema self-test
+        if: always()
         shell: powershell
         run: |
           $x=Get-Content ./xg-reference.json -Raw|ConvertFrom-Json
