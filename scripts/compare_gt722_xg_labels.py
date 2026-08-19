@@ -25,14 +25,21 @@ def candidates(obj):
     return out
 
 
+def load_json(path):
+    # PowerShell Out-File may emit a UTF-8 BOM on Windows runners.  Accept it
+    # explicitly so the comparator is transport-agnostic and does not confuse
+    # an encoding detail with a differential-engine failure.
+    return json.loads(Path(path).read_text(encoding="utf-8-sig"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("xg")
     ap.add_argument("mzand")
     ap.add_argument("--out", default="gt722-xg-diff.json")
     args = ap.parse_args()
-    xg = json.loads(Path(args.xg).read_text())
-    mz = json.loads(Path(args.mzand).read_text())
+    xg = load_json(args.xg)
+    mz = load_json(args.mzand)
     xr, mr = candidates(xg), candidates(mz)
     if not xr or not mr:
         raise SystemExit("both labels must contain candidates/moves")
@@ -58,7 +65,7 @@ def main():
         "shared_equity_mae": (sum(deltas)/len(deltas)) if deltas else None,
         "shared_equity_max_abs": max(deltas) if deltas else None,
     }
-    Path(args.out).write_text(json.dumps(report, indent=2) + "\n")
+    Path(args.out).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
 
 
