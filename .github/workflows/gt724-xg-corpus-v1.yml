@@ -1,0 +1,94 @@
+name: GT724 XG Corpus v1
+
+on:
+  push:
+    branches: [agent/mzand-xg-dual-engine-gate]
+    paths:
+      - .github/workflows/gt724-xg-corpus-v1.yml
+      - scripts/xg-switch-midgame-v15.ps1
+      - scripts/xg-run-midgame-xgrpp-export-v16.ps1
+      - scripts/parse_xg_position_export.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+jobs:
+  xg-corpus:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case_id: match11-start-51
+            xgid: 'XGID=-b----E-C---eE---c-e----B-:0:0:1:51:7:10:0:11:10'
+          - case_id: match5-midgame-33
+            xgid: 'XGID=-a----EaCA--eD---a-cbA--bA:0:0:1:33:0:0:0:5:10'
+          - case_id: match19-midgame-64
+            xgid: 'XGID=-a---BDBBA--dBb--c-dBa----:1:-1:-1:64:6:16:0:19:10'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XG from official installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven baseline XGID
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Analyze target with XG Roller++
+        shell: powershell
+        env:
+          MZAND_XGID: ${{ matrix.xgid }}
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-run-midgame-xgrpp-export-v16.ps1
+
+      - name: Parse structured target label
+        shell: powershell
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+          TARGET_XGID: ${{ matrix.xgid }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if(-not(Test-Path ./xg-v15-after-xgrpp.txt)){throw 'XGR++ export missing'}
+          python ./scripts/parse_xg_position_export.py ./xg-v15-after-xgrpp.txt ./xg-corpus-label.json
+          $x=Get-Content ./xg-corpus-label.json -Raw|ConvertFrom-Json
+          if($x.candidate_count-lt1){throw 'no parsed candidates'}
+          "CASE_ID=$env:CASE_ID"|Out-File ./xg-corpus-summary.txt
+          "TARGET_XGID=$env:TARGET_XGID"|Out-File ./xg-corpus-summary.txt -Append
+          "TOP1=$($x.candidates[0].move)"|Out-File ./xg-corpus-summary.txt -Append
+          "EQUITY=$($x.candidates[0].equity)"|Out-File ./xg-corpus-summary.txt -Append
+          "METHOD=$($x.candidates[0].analysis_method)"|Out-File ./xg-corpus-summary.txt -Append
+          Get-Content ./xg-corpus-summary.txt
+
+      - name: Upload XG corpus case
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gt724-xg-${{ matrix.case_id }}
+          path: |
+            xg-install.log
+            xg-v15-switch-report.txt
+            xg-v15-before-xgrpp.txt
+            xg-v15-after-xgrpp.txt
+            xg-v15-xgrpp-report.txt
+            xg-corpus-label.json
+            xg-corpus-summary.txt
+            xg-v16-*.png
+          if-no-files-found: ignore
+          retention-days: 14
