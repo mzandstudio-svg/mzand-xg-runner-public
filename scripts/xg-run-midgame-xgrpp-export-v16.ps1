@@ -2,6 +2,82 @@ $ErrorActionPreference='Stop'
 $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-run-midgame-xgrpp-export-v15.ps1'
 $src=Get-Content $srcPath -Raw
 
+$oldInvoke=@'
+function InvokeAutomationNo([System.Windows.Automation.AutomationElement]$dialog){
+  if($null-eq$dialog){return $false}; try{$c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'No');$b=$dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$c);if($null-eq$b){return $false};$p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern);if($null-eq$p){return $false};$p.Invoke();return $true}catch{return $false}
+}
+'@
+$newInvoke=@'
+function InvokeAutomationNo([System.Windows.Automation.AutomationElement]$dialog){
+  if($null-eq$dialog){return $false}
+  try{
+    $c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'No')
+    $b=$dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$c)
+    if($null-eq$b){return $false}
+    try{$p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern);if($null-ne$p){$p.Invoke();Start-Sleep -Milliseconds 700;return $true}}catch{}
+    try{$r=$b.Current.BoundingRectangle;if($r.Width-gt0 -and $r.Height-gt0){LeftClick ([int]($r.X+$r.Width/2)) ([int]($r.Y+$r.Height/2));Start-Sleep -Milliseconds 700;return $true}}catch{}
+  }catch{}
+  return $false
+}
+'@
+if(-not$src.Contains($oldInvoke)){throw 'v15 InvokeAutomationNo block not found'}
+$src=$src.Replace($oldInvoke,$newInvoke)
+
+$oldExport=@'
+function ExportText(){
+  $xg.Refresh(); [V15N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null; Start-Sleep -Milliseconds 250
+  [System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 700
+  try{return [string](Get-Clipboard -Raw -TextFormatType Text)}catch{return [string](Get-Clipboard -Raw)}
+}
+'@
+$newExport=@'
+function ExportText(){
+  $xg.Refresh(); [V15N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null; Start-Sleep -Milliseconds 250
+  $focusRect=New-Object V15N+RECT
+  if([V15N]::GetWindowRect([IntPtr]$xg.MainWindowHandle,[ref]$focusRect)){LeftClick ($focusRect.Left+130) ($focusRect.Top+364);Start-Sleep -Milliseconds 300}
+  [System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 700
+  try{return [string](Get-Clipboard -Raw -TextFormatType Text)}catch{return [string](Get-Clipboard -Raw)}
+}
+function ForceSaveGameNo(){
+  try{
+    $root=[System.Windows.Automation.AutomationElement]::RootElement
+    $all=$root.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+    foreach($e in $all){
+      try{
+        if([string]$e.Current.Name-eq'No' -and $e.Current.ProcessId-eq$xg.Id -and $e.Current.IsEnabled){
+          try{$p=$e.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern);if($null-ne$p){$p.Invoke();Start-Sleep 1;return $true}}catch{}
+          $r=$e.Current.BoundingRectangle
+          if($r.Width-gt0 -and $r.Height-gt0){LeftClick ([int]($r.X+$r.Width/2)) ([int]($r.Y+$r.Height/2));Start-Sleep 1;return $true}
+        }
+      }catch{}
+    }
+  }catch{}
+  return $false
+}
+'@
+if(-not$src.Contains($oldExport)){throw 'v15 ExportText block not found'}
+$src=$src.Replace($oldExport,$newExport)
+
+$oldDelayed=@'
+$saveDismissed=DismissDelayedSaveGame
+if($saveDismissed){Post 'xg-public-v15/delayed-save-dismissed' 'success' 'Delayed Save Game prompt dismissed with No';InvokeAnalyzePosition;Post 'xg-public-v15/midgame-analyze-reissued' 'success' 'Analyze Position reissued'}
+Start-Sleep 20
+'@
+$newDelayed=@'
+$saveDismissed=DismissDelayedSaveGame
+if($saveDismissed){
+  # Choosing No completes the pending transition. Re-pasting here would create
+  # the same Save Game prompt again. Continue on the transitioned position.
+  Post 'xg-public-v15/delayed-save-dismissed' 'success' 'Delayed Save Game prompt dismissed with No; no repaste'
+  $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+  $xg.Refresh();Start-Sleep 1;InvokeAnalyzePosition
+  Post 'xg-public-v15/midgame-analyze-reissued' 'success' 'Analyze Position reissued after completed transition'
+}
+Start-Sleep 20
+'@
+if(-not$src.Contains($oldDelayed)){throw 'v15 delayed-save block not found'}
+$src=$src.Replace($oldDelayed,$newDelayed)
+
 $old=@'
 $baseline=ExportText
 Set-Content "$env:GITHUB_WORKSPACE\xg-v15-before-xgrpp.txt" $baseline -Encoding UTF8
@@ -10,33 +86,54 @@ $beforeSource=TopSource $baseline
 "BASELINE_CLIPBOARD_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
 if(-not$beforeSource){throw 'Could not parse baseline top candidate source'}
 '@
-
 $new=@'
 $baseline=''
 $beforeSource=''
-for($baselineAttempt=1;$baselineAttempt-le3 -and -not$beforeSource;$baselineAttempt++){
+for($baselineAttempt=1;$baselineAttempt-le3;$baselineAttempt++){
   $baseline=ExportText
   $beforeSource=TopSource $baseline
   $looksLikeXgid=$baseline.Trim().StartsWith('XGID=')
+  $savePrompt=($baseline -match '(?is)\[Window Title\]\s*Save Game.*current game is not saved')
+  $structuredEnough=($baseline.Length-gt100 -and -not$looksLikeXgid -and -not$savePrompt)
   "BASELINE_ATTEMPT_${baselineAttempt}_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
   "BASELINE_ATTEMPT_${baselineAttempt}_SOURCE: $beforeSource"|Out-File $report15 -Append
   "BASELINE_ATTEMPT_${baselineAttempt}_XGID_ONLY: $looksLikeXgid"|Out-File $report15 -Append
-  if($beforeSource){break}
-  if($looksLikeXgid -or $baseline.Length-lt100){
+  "BASELINE_ATTEMPT_${baselineAttempt}_SAVE_PROMPT: $savePrompt"|Out-File $report15 -Append
+  "BASELINE_ATTEMPT_${baselineAttempt}_STRUCTURED_ENOUGH: $structuredEnough"|Out-File $report15 -Append
+  if($beforeSource -or ($env:MZAND_XG_BASELINE_ONLY-eq'1' -and $structuredEnough)){break}
+
+  if($savePrompt){
+    $forced=ForceSaveGameNo
+    "BASELINE_ATTEMPT_${baselineAttempt}_FORCE_NO: $forced"|Out-File $report15 -Append
+    if(-not$forced){throw 'Save Game prompt detected but UI Automation could not invoke No'}
+    Post 'xg-public-v16/save-prompt-no-invoked' 'success' "Save Game No invoked on baseline attempt $baselineAttempt; no repaste"
+    # The pending paste/action continues after No. Do not paste again: that is
+    # what caused the prior infinite Save Game loop.
+    $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+    $xg.Refresh();Start-Sleep 2;InvokeAnalyzePosition
+    Post 'xg-public-v16/midgame-analyze-after-no' 'success' "Analyze Position reissued after Save Game No"
+  }else{
     $retryDismissed=DismissDelayedSaveGame
     "BASELINE_ATTEMPT_${baselineAttempt}_SAVE_DISMISSED: $retryDismissed"|Out-File $report15 -Append
-    InvokeAnalyzePosition
-    Post 'xg-public-v16/midgame-analyze-retry' 'success' "baseline attempt $baselineAttempt reissued Analyze Position"
-    Start-Sleep 20
-    Shot "$env:GITHUB_WORKSPACE\xg-v16-baseline-retry-${baselineAttempt}.png"
+    if($retryDismissed){$xg.Refresh();Start-Sleep 1;InvokeAnalyzePosition}
+    else{
+      # No dialog was found and no structured export exists: only then perform a
+      # fresh bounded target paste, followed by Analyze.
+      & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
+      $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+      $xg.Refresh();InvokeAnalyzePosition
+    }
   }
+  Start-Sleep 20
+  Shot "$env:GITHUB_WORKSPACE\xg-v16-baseline-retry-${baselineAttempt}.png"
 }
 Set-Content "$env:GITHUB_WORKSPACE\xg-v15-before-xgrpp.txt" $baseline -Encoding UTF8
 "TOP_SOURCE_BEFORE_XGRPP: $beforeSource"|Out-File $report15 -Append
 "BASELINE_CLIPBOARD_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
-if(-not$beforeSource){throw 'Could not parse baseline top candidate source after 3 bounded analysis retries'}
+if($env:MZAND_XG_BASELINE_ONLY-eq'1'){
+  if($baseline.Length-le100 -or $baseline.Trim().StartsWith('XGID=') -or $baseline -match '(?is)\[Window Title\]\s*Save Game'){throw 'No structured baseline export after bounded retries'}
+}else{if(-not$beforeSource){throw 'Could not parse baseline top candidate source after 3 bounded analysis retries'}}
 '@
-
 if(-not$src.Contains($old)){throw 'v15 baseline block not found'}
 $patched=$src.Replace($old,$new)
 $tmp=Join-Path $env:RUNNER_TEMP 'xg-v16-patched.ps1'

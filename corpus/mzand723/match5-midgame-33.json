@@ -1,0 +1,14 @@
+{
+  "schema": "mzand.gt723.mac-final.label.v1",
+  "xgid": "XGID=-a----EaCA--eD---a-cbA--bA:0:0:1:33:0:0:0:5:10",
+  "analysis_path": "gt-strong-hotfix-wide-2ply",
+  "moves": [
+    {"rank":1,"move":"13/10 10/7 7/4* 4/1","equity":0.998540,"context_value":0.413322,"cubeless_equity":-1.09195,"source":"GT722 GNU Search","equity_comparable_to_xg":false},
+    {"rank":2,"move":"13/10 10/7 13/10 7/4*","equity":0.908348,"context_value":0.354845,"cubeless_equity":-1.83326,"source":"GT722 GNU Search","equity_comparable_to_xg":false},
+    {"rank":3,"move":"13/10 10/7 18/15 7/4*","equity":0.884953,"context_value":0.361516,"cubeless_equity":-1.75566,"source":"GT722 GNU Search","equity_comparable_to_xg":false},
+    {"rank":4,"move":"13/10 10/7 7/4* 8/5","equity":0.884067,"context_value":0.424837,"cubeless_equity":-0.947082,"source":"GT722 GNU Search","equity_comparable_to_xg":false},
+    {"rank":5,"move":"13/10 10/7 24/21 7/4*","equity":0.855089,"context_value":0.374890,"cubeless_equity":-1.57428,"source":"GT722 GNU Search","equity_comparable_to_xg":false}
+  ],
+  "cube":{"valid":true,"action":"NO DOUBLE","response":"TAKE","no_double":0.352570,"double_take":0.165954,"double_pass":0.576500},
+  "provenance":"GT723 Mac Final source, frozen differential output; rank score is not claimed to be XG normalized equity"
+}

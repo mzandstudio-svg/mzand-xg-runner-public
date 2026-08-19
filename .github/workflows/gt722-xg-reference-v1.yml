@@ -1,0 +1,104 @@
+name: GT722 XG Differential Reference v1
+
+on:
+  push:
+    branches: [agent/mzand-xg-dual-engine-gate]
+    paths:
+      - .github/workflows/gt722-xg-reference-v1.yml
+      - scripts/compare_gt722_xg_labels.py
+      - scripts/xg-analyze-win32-v3.ps1
+      - scripts/xg-export-clipboard-v13.ps1
+      - scripts/parse_xg_position_export.py
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/gt722-xg-reference-v1.yml
+      - scripts/compare_gt722_xg_labels.py
+      - scripts/xg-analyze-win32-v3.ps1
+      - scripts/xg-export-clipboard-v13.ps1
+      - scripts/parse_xg_position_export.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  statuses: write
+
+jobs:
+  xg-reference:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XG from official installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $i=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $i -UseBasicParsing
+          $l=Join-Path $env:RUNNER_TEMP 'xg-install.log'
+          $p=Start-Process $i -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$l") -Wait -PassThru
+          if(Test-Path $l){Copy-Item $l "$env:GITHUB_WORKSPACE\xg-install.log"}
+          if($p.ExitCode-ne0){throw "Install failed $($p.ExitCode)"}
+          $e='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $e)){throw 'XG executable missing'}
+          "xgexe=$e"|Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach frozen reference position
+        continue-on-error: true
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-analyze-win32-v3.ps1
+
+      - name: Export XG structured analysis
+        if: always()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_SHA: ${{ github.sha }}
+        run: ./scripts/xg-export-clipboard-v13.ps1
+
+      - name: Parse and validate XG label
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python ./scripts/parse_xg_position_export.py ./xg-v13-position-clipboard.txt ./xg-reference.json
+          $x=Get-Content ./xg-reference.json -Raw|ConvertFrom-Json
+          if($x.schema-ne'mzand.xg.position-label.v1'){throw 'schema mismatch'}
+          if($x.candidate_count-lt1){throw 'no candidates'}
+          "XG_TOP1=$($x.candidates[0].move)"|Out-File ./gt722-xg-reference-summary.txt
+          "XG_EQUITY=$($x.candidates[0].equity)"|Out-File ./gt722-xg-reference-summary.txt -Append
+          "XG_METHOD=$($x.candidates[0].analysis_method)"|Out-File ./gt722-xg-reference-summary.txt -Append
+          Get-Content ./gt722-xg-reference-summary.txt
+
+      - name: Comparator schema self-test
+        if: always()
+        shell: powershell
+        run: |
+          $x=Get-Content ./xg-reference.json -Raw|ConvertFrom-Json
+          $m=@{schema='gt722.mzand.label.v1';xgid=$x.xgid;candidates=@()}
+          foreach($c in $x.candidates){$m.candidates += @{rank=$c.rank;move=$c.move;equity=$c.equity}}
+          $m|ConvertTo-Json -Depth 8|Out-File ./mzand-comparator-selftest.json -Encoding utf8
+          python ./scripts/compare_gt722_xg_labels.py ./xg-reference.json ./mzand-comparator-selftest.json --out ./comparator-selftest-report.json
+          $r=Get-Content ./comparator-selftest-report.json -Raw|ConvertFrom-Json
+          if(-not $r.top1_agree){throw 'comparator top1 self-test failed'}
+
+      - name: Upload reference evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gt722-xg-reference-v1
+          path: |
+            xg-install.log
+            xg-v13-position-clipboard.txt
+            xg-reference.json
+            gt722-xg-reference-summary.txt
+            comparator-selftest-report.json
+            xg-*.png
+            xg-*-processes.txt
+          if-no-files-found: ignore
+          retention-days: 14

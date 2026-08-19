@@ -1,0 +1,14 @@
+{
+  "schema": "mzand.gt723.mac-final.label.v1",
+  "xgid": "XGID=-b----E-C---eE---c-e----B-:0:0:1:51:7:10:0:11:10",
+  "analysis_path": "gt-strong-hotfix-wide-2ply",
+  "moves": [
+    {"rank":1,"move":"13/8 24/23","equity":0.899526,"context_value":0.158807,"cubeless_equity":-0.0193138,"source":"GT Opening","equity_comparable_to_xg":true},
+    {"rank":2,"move":"24/23 23/18","equity":0.863084,"context_value":0.161814,"cubeless_equity":0.0341176,"source":"GT Opening","equity_comparable_to_xg":true},
+    {"rank":3,"move":"13/8 6/5","equity":0.846753,"context_value":0.142054,"cubeless_equity":-0.234237,"source":"GT Opening","equity_comparable_to_xg":true},
+    {"rank":4,"move":"13/8 8/7","equity":0.831512,"context_value":0.150917,"cubeless_equity":-0.136137,"source":"GT Opening","equity_comparable_to_xg":true},
+    {"rank":5,"move":"24/23 8/3","equity":0.760923,"context_value":0.159920,"cubeless_equity":0.0255277,"source":"GT Search / GT Opening anchor","equity_comparable_to_xg":false}
+  ],
+  "cube":{"valid":true,"action":"DOUBLE / TAKE","response":"TAKE","no_double":0.050780,"double_take":0.135234,"double_pass":0.250410},
+  "provenance":"GT723 Mac Final source, frozen differential output; no XG assets"
+}
