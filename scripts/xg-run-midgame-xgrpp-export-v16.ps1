@@ -2,6 +2,33 @@ $ErrorActionPreference='Stop'
 $srcPath=Join-Path $env:GITHUB_WORKSPACE 'scripts\xg-run-midgame-xgrpp-export-v15.ps1'
 $src=Get-Content $srcPath -Raw
 
+$oldInvoke=@'
+function InvokeAutomationNo([System.Windows.Automation.AutomationElement]$dialog){
+  if($null-eq$dialog){return $false}; try{$c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'No');$b=$dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$c);if($null-eq$b){return $false};$p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern);if($null-eq$p){return $false};$p.Invoke();return $true}catch{return $false}
+}
+'@
+$newInvoke=@'
+function InvokeAutomationNo([System.Windows.Automation.AutomationElement]$dialog){
+  if($null-eq$dialog){return $false}
+  try{
+    $c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'No')
+    $b=$dialog.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$c)
+    if($null-eq$b){return $false}
+    try{
+      $p=$b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+      if($null-ne$p){$p.Invoke();Start-Sleep -Milliseconds 700;return $true}
+    }catch{}
+    try{
+      $r=$b.Current.BoundingRectangle
+      if($r.Width-gt0 -and $r.Height-gt0){LeftClick ([int]($r.X+$r.Width/2)) ([int]($r.Y+$r.Height/2));Start-Sleep -Milliseconds 700;return $true}
+    }catch{}
+  }catch{}
+  return $false
+}
+'@
+if(-not$src.Contains($oldInvoke)){throw 'v15 InvokeAutomationNo block not found'}
+$src=$src.Replace($oldInvoke,$newInvoke)
+
 $oldExport=@'
 function ExportText(){
   $xg.Refresh(); [V15N]::SetForegroundWindow([IntPtr]$xg.MainWindowHandle)|Out-Null; Start-Sleep -Milliseconds 250
@@ -28,6 +55,28 @@ function ExportText(){
 if(-not$src.Contains($oldExport)){throw 'v15 ExportText block not found'}
 $src=$src.Replace($oldExport,$newExport)
 
+$oldDelayed=@'
+$saveDismissed=DismissDelayedSaveGame
+if($saveDismissed){Post 'xg-public-v15/delayed-save-dismissed' 'success' 'Delayed Save Game prompt dismissed with No';InvokeAnalyzePosition;Post 'xg-public-v15/midgame-analyze-reissued' 'success' 'Analyze Position reissued'}
+Start-Sleep 20
+'@
+$newDelayed=@'
+$saveDismissed=DismissDelayedSaveGame
+if($saveDismissed){
+  Post 'xg-public-v15/delayed-save-dismissed' 'success' 'Delayed Save Game prompt dismissed with No'
+  # A delayed Save Game prompt means the target paste was intercepted. Repaste
+  # the requested XGID after dismissal before reissuing Analyze Position.
+  & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
+  $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+  $xg.Refresh()
+  InvokeAnalyzePosition
+  Post 'xg-public-v15/midgame-analyze-reissued' 'success' 'target XGID repasted; Analyze Position reissued'
+}
+Start-Sleep 20
+'@
+if(-not$src.Contains($oldDelayed)){throw 'v15 delayed-save block not found'}
+$src=$src.Replace($oldDelayed,$newDelayed)
+
 $old=@'
 $baseline=ExportText
 Set-Content "$env:GITHUB_WORKSPACE\xg-v15-before-xgrpp.txt" $baseline -Encoding UTF8
@@ -52,8 +101,13 @@ for($baselineAttempt=1;$baselineAttempt-le3;$baselineAttempt++){
   if($beforeSource -or ($env:MZAND_XG_BASELINE_ONLY-eq'1' -and $structuredEnough)){break}
   $retryDismissed=DismissDelayedSaveGame
   "BASELINE_ATTEMPT_${baselineAttempt}_SAVE_DISMISSED: $retryDismissed"|Out-File $report15 -Append
+  # Re-establish the exact requested position on every bounded retry; the parser
+  # later verifies the exported XGID exactly, so a stale prior position cannot pass.
+  & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
+  $xg=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+  $xg.Refresh()
   InvokeAnalyzePosition
-  Post 'xg-public-v16/midgame-analyze-retry' 'success' "baseline attempt $baselineAttempt reissued Analyze Position"
+  Post 'xg-public-v16/midgame-analyze-retry' 'success' "target repasted; baseline attempt $baselineAttempt reissued Analyze Position"
   Start-Sleep 20
   Shot "$env:GITHUB_WORKSPACE\xg-v16-baseline-retry-${baselineAttempt}.png"
 }
