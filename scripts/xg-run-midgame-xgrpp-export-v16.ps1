@@ -93,14 +93,29 @@ for($baselineAttempt=1;$baselineAttempt-le3;$baselineAttempt++){
   $baseline=ExportText
   $beforeSource=TopSource $baseline
   $looksLikeXgid=$baseline.Trim().StartsWith('XGID=')
-  $structuredEnough=($baseline.Length-gt100 -and -not$looksLikeXgid)
+  $savePrompt=($baseline -match '(?is)\[Window Title\]\s*Save Game.*current game is not saved')
+  $structuredEnough=($baseline.Length-gt100 -and -not$looksLikeXgid -and -not$savePrompt)
   "BASELINE_ATTEMPT_${baselineAttempt}_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
   "BASELINE_ATTEMPT_${baselineAttempt}_SOURCE: $beforeSource"|Out-File $report15 -Append
   "BASELINE_ATTEMPT_${baselineAttempt}_XGID_ONLY: $looksLikeXgid"|Out-File $report15 -Append
+  "BASELINE_ATTEMPT_${baselineAttempt}_SAVE_PROMPT: $savePrompt"|Out-File $report15 -Append
   "BASELINE_ATTEMPT_${baselineAttempt}_STRUCTURED_ENOUGH: $structuredEnough"|Out-File $report15 -Append
   if($beforeSource -or ($env:MZAND_XG_BASELINE_ONLY-eq'1' -and $structuredEnough)){break}
-  $retryDismissed=DismissDelayedSaveGame
-  "BASELINE_ATTEMPT_${baselineAttempt}_SAVE_DISMISSED: $retryDismissed"|Out-File $report15 -Append
+
+  if($savePrompt){
+    # Ctrl+C on a native Save Game message box produces the bracketed text above.
+    # In XG the default focus is Yes and button order is Yes/No/Cancel, so one
+    # Right then Enter chooses No without coordinate assumptions.
+    [System.Windows.Forms.SendKeys]::SendWait('{RIGHT}')
+    Start-Sleep -Milliseconds 200
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep 1
+    Post 'xg-public-v16/save-prompt-keyboard-dismissed' 'success' "Save Game prompt dismissed on baseline attempt $baselineAttempt"
+  }else{
+    $retryDismissed=DismissDelayedSaveGame
+    "BASELINE_ATTEMPT_${baselineAttempt}_SAVE_DISMISSED: $retryDismissed"|Out-File $report15 -Append
+  }
+
   # Re-establish the exact requested position on every bounded retry; the parser
   # later verifies the exported XGID exactly, so a stale prior position cannot pass.
   & "$env:GITHUB_WORKSPACE\scripts\xg-switch-midgame-v15.ps1"
@@ -115,7 +130,7 @@ Set-Content "$env:GITHUB_WORKSPACE\xg-v15-before-xgrpp.txt" $baseline -Encoding 
 "TOP_SOURCE_BEFORE_XGRPP: $beforeSource"|Out-File $report15 -Append
 "BASELINE_CLIPBOARD_LENGTH: $($baseline.Length)"|Out-File $report15 -Append
 if($env:MZAND_XG_BASELINE_ONLY-eq'1'){
-  if($baseline.Length-le100 -or $baseline.Trim().StartsWith('XGID=')){throw 'No structured baseline export after bounded retries'}
+  if($baseline.Length-le100 -or $baseline.Trim().StartsWith('XGID=') -or $baseline -match '(?is)\[Window Title\]\s*Save Game'){throw 'No structured baseline export after bounded retries'}
 }else{
   if(-not$beforeSource){throw 'Could not parse baseline top candidate source after 3 bounded analysis retries'}
 }
