@@ -80,7 +80,7 @@ jobs:
         shell: powershell
         run: |
           $x=Get-Content ./xg-reference.json -Raw|ConvertFrom-Json
-          $m=@{schema='gt722.mzand.label.v1';candidates=@()}
+          $m=@{schema='gt722.mzand.label.v1';xgid=$x.xgid;candidates=@()}
           foreach($c in $x.candidates){$m.candidates += @{rank=$c.rank;move=$c.move;equity=$c.equity}}
           $m|ConvertTo-Json -Depth 8|Out-File ./mzand-comparator-selftest.json -Encoding utf8
           python ./scripts/compare_gt722_xg_labels.py ./xg-reference.json ./mzand-comparator-selftest.json --out ./comparator-selftest-report.json
