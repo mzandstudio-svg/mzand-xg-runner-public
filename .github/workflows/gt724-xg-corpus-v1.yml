@@ -9,6 +9,8 @@ on:
       - scripts/xg-run-midgame-xgrpp-export-v15.ps1
       - scripts/xg-run-midgame-xgrpp-export-v16.ps1
       - scripts/parse_xg_position_export.py
+      - scripts/compare_gt722_xg_labels.py
+      - corpus/mzand723/**
   workflow_dispatch:
 
 permissions:
@@ -78,6 +80,21 @@ jobs:
           "METHOD=$($x.candidates[0].analysis_method)"|Out-File ./xg-corpus-summary.txt -Append
           Get-Content ./xg-corpus-summary.txt
 
+      - name: Compare XG with frozen GT723 Mac label
+        shell: powershell
+        env:
+          CASE_ID: ${{ matrix.case_id }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $mz="./corpus/mzand723/$env:CASE_ID.json"
+          if(-not(Test-Path $mz)){throw "missing frozen MZand label $mz"}
+          python ./scripts/compare_gt722_xg_labels.py ./xg-corpus-label.json $mz --out ./gt724-xg-diff.json
+          $r=Get-Content ./gt724-xg-diff.json -Raw|ConvertFrom-Json
+          "TOP1_AGREE=$($r.top1_agree)"|Out-File ./gt724-diff-summary.txt
+          "TOP5=$($r.mzand_top1_in_xg_top5)"|Out-File ./gt724-diff-summary.txt -Append
+          "SHARED_FINAL_BOARDS=$($r.shared_final_boards)"|Out-File ./gt724-diff-summary.txt -Append
+          Get-Content ./gt724-diff-summary.txt
+
       - name: Upload XG corpus case
         if: always()
         uses: actions/upload-artifact@v7
@@ -91,6 +108,8 @@ jobs:
             xg-v15-xgrpp-report.txt
             xg-corpus-label.json
             xg-corpus-summary.txt
+            gt724-xg-diff.json
+            gt724-diff-summary.txt
             xg-v16-*.png
           if-no-files-found: ignore
           retention-days: 14
@@ -105,8 +124,11 @@ jobs:
           JOB_STATUS: ${{ job.status }}
         run: |
           $state=if($env:JOB_STATUS-eq'success'){'success'}else{'failure'}
-          $haveLabel=Test-Path "$env:GITHUB_WORKSPACE\xg-corpus-label.json"
-          if(-not$haveLabel){$state='failure'}
-          $payload=@{state=$state;context="gt724-xg-corpus/$env:CASE_ID";description="job=$env:JOB_STATUS label=$haveLabel"}|ConvertTo-Json -Compress
+          $desc="job=$env:JOB_STATUS"
+          if(Test-Path "$env:GITHUB_WORKSPACE\gt724-xg-diff.json"){
+            $r=Get-Content "$env:GITHUB_WORKSPACE\gt724-xg-diff.json" -Raw|ConvertFrom-Json
+            $desc="top1=$($r.top1_agree) top5=$($r.mzand_top1_in_xg_top5) shared=$($r.shared_final_boards)"
+          }else{$state='failure';$desc="$desc diff=false"}
+          $payload=@{state=$state;context="gt724-xg-corpus/$env:CASE_ID";description=$desc}|ConvertTo-Json -Compress
           $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
           Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/statuses/$env:GATE_SHA" -Headers $headers -Body $payload -ContentType 'application/json'|Out-Null
