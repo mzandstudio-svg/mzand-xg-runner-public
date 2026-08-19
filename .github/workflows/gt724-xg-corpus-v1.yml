@@ -11,6 +11,16 @@ on:
       - scripts/parse_xg_position_export.py
       - scripts/compare_gt722_xg_labels.py
       - corpus/mzand723/**
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/gt724-xg-corpus-v1.yml
+      - scripts/xg-switch-midgame-v15.ps1
+      - scripts/xg-run-midgame-xgrpp-export-v15.ps1
+      - scripts/xg-run-midgame-xgrpp-export-v16.ps1
+      - scripts/parse_xg_position_export.py
+      - scripts/compare_gt722_xg_labels.py
+      - corpus/mzand723/**
   workflow_dispatch:
 
 permissions:
