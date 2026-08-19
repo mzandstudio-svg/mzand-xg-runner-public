@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/gt724-xg-corpus-v1.yml
       - scripts/xg-switch-midgame-v15.ps1
+      - scripts/xg-run-midgame-xgrpp-export-v15.ps1
       - scripts/xg-run-midgame-xgrpp-export-v16.ps1
       - scripts/parse_xg_position_export.py
   workflow_dispatch:
@@ -18,7 +19,7 @@ permissions:
 jobs:
   xg-corpus:
     runs-on: windows-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -50,10 +51,11 @@ jobs:
         shell: powershell
         run: ./scripts/xg-reach-xgid.ps1
 
-      - name: Analyze target with XG Roller++
+      - name: Analyze target and capture XG baseline
         shell: powershell
         env:
           MZAND_XGID: ${{ matrix.xgid }}
+          MZAND_XG_BASELINE_ONLY: '1'
           GH_TOKEN: ${{ github.token }}
           GATE_SHA: ${{ github.sha }}
         run: ./scripts/xg-run-midgame-xgrpp-export-v16.ps1
@@ -65,7 +67,7 @@ jobs:
           TARGET_XGID: ${{ matrix.xgid }}
         run: |
           $ErrorActionPreference='Stop'
-          if(-not(Test-Path ./xg-v15-after-xgrpp.txt)){throw 'XGR++ export missing'}
+          if(-not(Test-Path ./xg-v15-after-xgrpp.txt)){throw 'XG baseline export missing'}
           python ./scripts/parse_xg_position_export.py ./xg-v15-after-xgrpp.txt ./xg-corpus-label.json
           $x=Get-Content ./xg-corpus-label.json -Raw|ConvertFrom-Json
           if($x.candidate_count-lt1){throw 'no parsed candidates'}
