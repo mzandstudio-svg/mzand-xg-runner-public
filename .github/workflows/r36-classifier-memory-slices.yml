@@ -1,4 +1,4 @@
-name: R36.5 XG Classifier Metric Globals
+name: R36.6 XG Cube Dispatcher Xrefs
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump classifier metric globals
+      - name: Find dispatcher callers
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -51,29 +51,39 @@ jobs:
           if(-not $proc){ throw 'XG process not found after proven startup' }
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){ throw 'OpenProcess failed' }
-          function Dump-Range([string]$name,[UInt64]$va,[int]$len) {
-            $buf=New-Object byte[] $len
-            $got=[IntPtr]::Zero
-            $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new([Int64]$va),$buf,$len,[ref]$got)
-            if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
-            $hex=($buf | ForEach-Object { $_.ToString('x2') }) -join ''
-            $line="R36_RANGE name=$name va=0x$($va.ToString('x')) len=$len hex=$hex"
-            Add-Content -Path ./r36-classifier-globals.txt -Value $line
-            Write-Host $line
+          $base=[UInt64]0x00400000
+          $len=0x00600000
+          $buf=New-Object byte[] $len
+          $got=[IntPtr]::Zero
+          $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new([Int64]$base),$buf,$len,[ref]$got)
+          if(-not $ok){ throw "ReadProcessMemory image failed got=$($got.ToInt64())" }
+          $targets=@([UInt64]0x009DAD30,[UInt64]0x009DA8C0)
+          foreach($t in $targets){
+            for($i=0;$i -le $got.ToInt64()-5;$i++){
+              if($buf[$i] -ne 0xE8){ continue }
+              $rel=[BitConverter]::ToInt32($buf,$i+1)
+              $src=$base+[UInt64]$i
+              $dst=[Int64]$src+5+[Int64]$rel
+              if([UInt64]$dst -ne $t){ continue }
+              $lo=[Math]::Max(0,$i-64); $hi=[Math]::Min($got.ToInt64(),$i+96)
+              $slice=New-Object byte[] ($hi-$lo)
+              [Array]::Copy($buf,$lo,$slice,0,$slice.Length)
+              $hex=($slice|ForEach-Object{$_.ToString('x2')})-join''
+              $line="R36_XREF target=0x$($t.ToString('x')) call=0x$($src.ToString('x')) slice_va=0x$(($base+[UInt64]$lo).ToString('x')) hex=$hex"
+              Add-Content ./r36-cube-xrefs.txt $line
+              Write-Host $line
+            }
           }
-          try {
-            Dump-Range 'classifier_params' 0x00A0EC70 0x10
-            Dump-Range 'classifier_table' 0x00B04068 0x1100
-          } finally { [Mem]::CloseHandle($h) | Out-Null }
-          Write-Host 'R36_CLASSIFIER_GLOBALS=PASS'
+          [Mem]::CloseHandle($h)|Out-Null
+          Write-Host 'R36_CUBE_XREFS=PASS'
 
-      - name: Upload slice
+      - name: Upload xrefs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-classifier-globals
+          name: r36-cube-xrefs
           path: |
-            r36-classifier-globals.txt
+            r36-cube-xrefs.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
