@@ -1,10 +1,9 @@
-name: R36.15 XG Endpoint Pointer Object
+name: R36.16 XG Endpoint Builder Xrefs
 
 on:
   push:
     branches: [r35-xg-1ply-cube-oracle]
-    paths:
-      - .github/workflows/r36-classifier-memory-slices.yml
+    paths: [.github/workflows/r36-classifier-memory-slices.yml]
   workflow_dispatch:
 
 permissions:
@@ -16,25 +15,20 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - name: Install eXtreme Gammon
         shell: powershell
         run: |
-          $ErrorActionPreference='Stop'
           $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
           Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
           $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
           if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
           $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
-          if(-not(Test-Path $exe)){throw 'XG missing'}
           "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
           "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
-
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-
-      - name: Dump endpoint pointer object
+      - name: Find rel32 callers
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -48,44 +42,35 @@ jobs:
           }
           '@
           $proc=Get-Process | Where-Object { $_.ProcessName -match 'eXtremeGammon2|ExtremeGammon2' } | Select-Object -First 1
-          if(-not $proc){throw 'XG process not found'}
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
-          if($h -eq [IntPtr]::Zero){throw 'OpenProcess failed'}
-          function Read-Bytes([Int64]$va,[int]$len){
-            $buf=New-Object byte[] $len
-            $got=[IntPtr]::Zero
-            $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$len,[ref]$got)
-            if(-not $ok -or $got.ToInt64() -ne $len){throw "ReadProcessMemory failed va=0x$($va.ToString('x')) got=$($got.ToInt64())"}
-            return $buf
-          }
+          $base=0x00400000L; $end=0x00A10000L; $chunk=0x1000
+          $targets=@(0x009DA770L,0x009DA820L)
           try {
-            $pbytes=Read-Bytes 0x00B0AD18 4
-            $ptr=[BitConverter]::ToUInt32($pbytes,0)
-            "ENDPOINT_PTR=0x$($ptr.ToString('x8'))" | Tee-Object -FilePath ./r36-endpoint-pointer.txt -Append
-            $obj=Read-Bytes $ptr 0x400
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_pointer_object.bin'),$obj)
-            for($o=0;$o -lt 0x100;$o+=4){
-              $u=[BitConverter]::ToUInt32($obj,$o)
-              $f=[BitConverter]::ToSingle($obj,$o)
-              "OBJ off=0x$($o.ToString('x2')) u32=$u hex=0x$($u.ToString('x8')) f32=$f" | Add-Content ./r36-endpoint-pointer.txt
+            for($va=$base; $va -lt $end; $va+=$chunk){
+              $buf=New-Object byte[] $chunk; $got=[IntPtr]::Zero
+              if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$chunk,[ref]$got)){continue}
+              $n=[int]$got.ToInt64()
+              for($i=0;$i -le $n-5;$i++){
+                if($buf[$i]-ne0xE8){continue}
+                $rel=[BitConverter]::ToInt32($buf,$i+1)
+                $src=$va+$i; $tgt=$src+5+$rel
+                if($targets -contains $tgt){
+                  $start=[Math]::Max(0,$i-48); $len=[Math]::Min(128,$n-$start)
+                  $hex=($buf[$start..($start+$len-1)]|ForEach-Object{$_.ToString('x2')})-join''
+                  "XREF src=0x$($src.ToString('x')) target=0x$($tgt.ToString('x')) window_va=0x$(($va+$start).ToString('x')) hex=$hex" | Tee-Object -FilePath ./r36-endpoint-xrefs.txt -Append
+                }
+              }
             }
-            $globals=Read-Bytes 0x00B0ACF0 0x200
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_runtime_globals.bin'),$globals)
-            $objTable=Read-Bytes 0x00B0AE00 0x300
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_object_table.bin'),$objTable)
-          } finally { [Mem]::CloseHandle($h)|Out-Null }
-          Write-Host 'R36_ENDPOINT_POINTER_OBJECT=PASS'
-
-      - name: Upload endpoint pointer object
+          } finally {[Mem]::CloseHandle($h)|Out-Null}
+          if(-not(Test-Path ./r36-endpoint-xrefs.txt)){throw 'no xrefs found'}
+          Write-Host 'R36_ENDPOINT_XREFS=PASS'
+      - name: Upload xrefs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-endpoint-pointer-object
+          name: r36-endpoint-builder-xrefs
           path: |
-            r36-endpoint-pointer.txt
-            endpoint_pointer_object.bin
-            endpoint_runtime_globals.bin
-            endpoint_object_table.bin
+            r36-endpoint-xrefs.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
