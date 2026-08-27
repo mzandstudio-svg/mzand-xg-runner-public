@@ -1,4 +1,4 @@
-name: R36.12 XG MET Table Closure
+name: R36.13 XG Money Endpoint Coefficient Table
 
 on:
   push:
@@ -26,7 +26,7 @@ jobs:
           $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
           if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
           $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
-          if(-not(Test-Path $exe)){throw 'XG missing'}
+          if(-not(Test-Path $exe)){ throw 'XG missing' }
           "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
           "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
 
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump MET backing tables
+      - name: Dump money endpoint coefficient table
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -58,25 +58,25 @@ jobs:
             if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
             [IO.File]::WriteAllBytes((Join-Path $PWD "$name.bin"),$buf)
             $sha=(Get-FileHash "$name.bin" -Algorithm SHA256).Hash.ToLower()
-            "R36_BINARY name=$name va=0x$($va.ToString('x')) len=$len sha256=$sha" | Tee-Object -FilePath ./r36-met-table-summary.txt -Append
+            "R36_BINARY name=$name va=0x$($va.ToString('x')) len=$len sha256=$sha" | Tee-Object -FilePath ./r36-endpoint-coeff-summary.txt -Append
           }
           try {
-            Dump-Binary 'met_table_a6bc00' 0x00A6BC00 0x11000
-            Dump-Binary 'met_aux_a6c0e0' 0x00A6C0C0 0x80
-            Dump-Binary 'met_helper_constants' 0x006FFC20 0x170
+            # 66 slots, stride 0x800. 0x22000 safely covers slot 0..65 and
+            # coefficient quartet at +0x3f0/+0x3f4/+0x3f8/+0x3fc.
+            Dump-Binary 'endpoint_coeff_a2ac6c' 0x00A2AC6C 0x22000
+            Dump-Binary 'endpoint_formula_6fffec' 0x006FFFEC 0x240
           } finally { [Mem]::CloseHandle($h)|Out-Null }
-          Write-Host 'R36_MET_TABLE_CLOSURE=PASS'
+          Write-Host 'R36_MONEY_ENDPOINT_COEFFICIENT_TABLE=PASS'
 
-      - name: Upload MET closure
+      - name: Upload coefficient table
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-met-table-closure
+          name: r36-money-endpoint-coefficients
           path: |
-            met_table_a6bc00.bin
-            met_aux_a6c0e0.bin
-            met_helper_constants.bin
-            r36-met-table-summary.txt
+            endpoint_coeff_a2ac6c.bin
+            endpoint_formula_6fffec.bin
+            r36-endpoint-coeff-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
