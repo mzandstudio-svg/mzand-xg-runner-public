@@ -47,8 +47,8 @@ jobs:
             [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
           }
           '@
-          function I32([int]$x){ return [BitConverter]::GetBytes($x) }
-          function U32([uint32]$x){ return [BitConverter]::GetBytes($x) }
+          function I32([int]$x){ return ,([byte[]][BitConverter]::GetBytes($x)) }
+          function U32([uint32]$x){ return ,([byte[]][BitConverter]::GetBytes($x)) }
           function PutI32([byte[]]$b,[int]$o,[int]$v){[BitConverter]::GetBytes($v).CopyTo($b,$o)}
           function RunCase($h,[string]$name,[int[]]$p,[byte]$flag){
             if($p.Count-ne26){throw "$name board width"}
