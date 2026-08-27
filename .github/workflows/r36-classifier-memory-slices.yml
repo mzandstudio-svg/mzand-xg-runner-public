@@ -1,4 +1,4 @@
-name: R36.13 XG Money Endpoint Coefficient Table
+name: R36.14 XG Active Endpoint Slot
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump money endpoint coefficient table
+      - name: Dump active slot and endpoint metadata
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -51,32 +51,43 @@ jobs:
           if(-not $proc){ throw 'XG process not found after proven startup' }
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){ throw 'OpenProcess failed' }
-          function Dump-Binary([string]$name,[Int64]$va,[int]$len) {
+          function Read-Bytes([Int64]$va,[int]$len) {
             $buf=New-Object byte[] $len
             $got=[IntPtr]::Zero
             $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$len,[ref]$got)
-            if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
-            [IO.File]::WriteAllBytes((Join-Path $PWD "$name.bin"),$buf)
-            $sha=(Get-FileHash "$name.bin" -Algorithm SHA256).Hash.ToLower()
-            "R36_BINARY name=$name va=0x$($va.ToString('x')) len=$len sha256=$sha" | Tee-Object -FilePath ./r36-endpoint-coeff-summary.txt -Append
+            if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory failed va=0x$($va.ToString('x')) got=$($got.ToInt64())" }
+            return $buf
           }
           try {
-            # 66 slots, stride 0x800. 0x22000 safely covers slot 0..65 and
-            # coefficient quartet at +0x3f0/+0x3f4/+0x3f8/+0x3fc.
-            Dump-Binary 'endpoint_coeff_a2ac6c' 0x00A2AC6C 0x22000
-            Dump-Binary 'endpoint_formula_6fffec' 0x006FFFEC 0x240
+            $idxBytes=Read-Bytes 0x00B0AD18 4
+            $idx=[BitConverter]::ToInt32($idxBytes,0)
+            "ACTIVE_ENDPOINT_SLOT=$idx" | Tee-Object -FilePath ./r36-active-endpoint.txt -Append
+            if($idx -lt 0 -or $idx -gt 67){ throw "unexpected active slot $idx" }
+            $slotVA=0x00A2AC6C + ($idx * 0x800)
+            $slot=Read-Bytes $slotVA 0x800
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'active_endpoint_slot.bin'),$slot)
+            $c0=[BitConverter]::ToSingle($slot,0x3F0)
+            $c1=[BitConverter]::ToSingle($slot,0x3F4)
+            $c2=[BitConverter]::ToSingle($slot,0x3F8)
+            $c3=[BitConverter]::ToSingle($slot,0x3FC)
+            "ACTIVE_ENDPOINT_COEFF=$c0,$c1,$c2,$c3" | Tee-Object -FilePath ./r36-active-endpoint.txt -Append
+            $objTable=Read-Bytes 0x00B0AE78 0x120
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_object_table.bin'),$objTable)
+            $globals=Read-Bytes 0x00B0ACF0 0x80
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_runtime_globals.bin'),$globals)
           } finally { [Mem]::CloseHandle($h)|Out-Null }
-          Write-Host 'R36_MONEY_ENDPOINT_COEFFICIENT_TABLE=PASS'
+          Write-Host 'R36_ACTIVE_ENDPOINT_SLOT=PASS'
 
-      - name: Upload coefficient table
+      - name: Upload active endpoint metadata
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-money-endpoint-coefficients
+          name: r36-active-endpoint-slot
           path: |
-            endpoint_coeff_a2ac6c.bin
-            endpoint_formula_6fffec.bin
-            r36-endpoint-coeff-summary.txt
+            r36-active-endpoint.txt
+            active_endpoint_slot.bin
+            endpoint_object_table.bin
+            endpoint_runtime_globals.bin
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
