@@ -23,6 +23,9 @@ jobs:
           Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
           $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
           if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
