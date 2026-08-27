@@ -1,0 +1,82 @@
+name: R36.1 XG Classifier Memory Slices
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r36-classifier-memory-slices.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install eXtreme Gammon
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG missing"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven ready XG instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
+      - name: Dump unpacked classifier bytes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Mem {
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint a, bool i, int pid);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool ReadProcessMemory(IntPtr h, IntPtr addr, byte[] buf, int size, out IntPtr got);
+            [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+          }
+          '@
+          $proc=Get-Process | Where-Object { $_.ProcessName -match 'eXtremeGammon2|ExtremeGammon2' } | Select-Object -First 1
+          if(-not $proc){ throw 'XG process not found after proven startup' }
+          Write-Host ("R36_PID={0}" -f $proc.Id)
+          $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
+          if($h -eq [IntPtr]::Zero){ throw 'OpenProcess failed' }
+          function Dump-Range([string]$name,[UInt64]$va,[int]$len) {
+            $buf=New-Object byte[] $len
+            $got=[IntPtr]::Zero
+            $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new([Int64]$va),$buf,$len,[ref]$got)
+            if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
+            $hex=($buf | ForEach-Object { $_.ToString('x2') }) -join ''
+            $line="R36_RANGE name=$name va=0x$($va.ToString('x')) len=$len hex=$hex"
+            Add-Content -Path ./r36-classifier-ranges.txt -Value $line
+            Write-Host $line
+          }
+          try {
+            Dump-Range 'classifier_wrapper' 0x006F9580 0x80
+            Dump-Range 'classifier_prepare' 0x006F9C18 0xC00
+            Dump-Range 'classifier_final' 0x006FBF1C 0xA00
+          } finally { [Mem]::CloseHandle($h) | Out-Null }
+          Write-Host 'R36_CLASSIFIER_MEMORY_SLICES=PASS'
+
+      - name: Upload slices
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r36-classifier-memory-slices
+          path: |
+            r36-classifier-ranges.txt
+            r35-proven-startup-report.txt
+            r35-proven-startup-summary.txt
+          if-no-files-found: ignore
+          retention-days: 14
