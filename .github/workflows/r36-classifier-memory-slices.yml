@@ -1,4 +1,4 @@
-name: R36.14 XG Active Endpoint Slot
+name: R36.15 XG Endpoint Pointer Object
 
 on:
   push:
@@ -26,7 +26,7 @@ jobs:
           $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
           if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
           $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
-          if(-not(Test-Path $exe)){ throw 'XG missing' }
+          if(-not(Test-Path $exe)){throw 'XG missing'}
           "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
           "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
 
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump active slot and endpoint metadata
+      - name: Dump endpoint pointer object
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -48,46 +48,44 @@ jobs:
           }
           '@
           $proc=Get-Process | Where-Object { $_.ProcessName -match 'eXtremeGammon2|ExtremeGammon2' } | Select-Object -First 1
-          if(-not $proc){ throw 'XG process not found after proven startup' }
+          if(-not $proc){throw 'XG process not found'}
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
-          if($h -eq [IntPtr]::Zero){ throw 'OpenProcess failed' }
-          function Read-Bytes([Int64]$va,[int]$len) {
+          if($h -eq [IntPtr]::Zero){throw 'OpenProcess failed'}
+          function Read-Bytes([Int64]$va,[int]$len){
             $buf=New-Object byte[] $len
             $got=[IntPtr]::Zero
             $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$len,[ref]$got)
-            if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory failed va=0x$($va.ToString('x')) got=$($got.ToInt64())" }
+            if(-not $ok -or $got.ToInt64() -ne $len){throw "ReadProcessMemory failed va=0x$($va.ToString('x')) got=$($got.ToInt64())"}
             return $buf
           }
           try {
-            $idxBytes=Read-Bytes 0x00B0AD18 4
-            $idx=[BitConverter]::ToInt32($idxBytes,0)
-            "ACTIVE_ENDPOINT_SLOT=$idx" | Tee-Object -FilePath ./r36-active-endpoint.txt -Append
-            if($idx -lt 0 -or $idx -gt 67){ throw "unexpected active slot $idx" }
-            $slotVA=0x00A2AC6C + ($idx * 0x800)
-            $slot=Read-Bytes $slotVA 0x800
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'active_endpoint_slot.bin'),$slot)
-            $c0=[BitConverter]::ToSingle($slot,0x3F0)
-            $c1=[BitConverter]::ToSingle($slot,0x3F4)
-            $c2=[BitConverter]::ToSingle($slot,0x3F8)
-            $c3=[BitConverter]::ToSingle($slot,0x3FC)
-            "ACTIVE_ENDPOINT_COEFF=$c0,$c1,$c2,$c3" | Tee-Object -FilePath ./r36-active-endpoint.txt -Append
-            $objTable=Read-Bytes 0x00B0AE78 0x120
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_object_table.bin'),$objTable)
-            $globals=Read-Bytes 0x00B0ACF0 0x80
+            $pbytes=Read-Bytes 0x00B0AD18 4
+            $ptr=[BitConverter]::ToUInt32($pbytes,0)
+            "ENDPOINT_PTR=0x$($ptr.ToString('x8'))" | Tee-Object -FilePath ./r36-endpoint-pointer.txt -Append
+            $obj=Read-Bytes $ptr 0x400
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_pointer_object.bin'),$obj)
+            for($o=0;$o -lt 0x100;$o+=4){
+              $u=[BitConverter]::ToUInt32($obj,$o)
+              $f=[BitConverter]::ToSingle($obj,$o)
+              "OBJ off=0x$($o.ToString('x2')) u32=$u hex=0x$($u.ToString('x8')) f32=$f" | Add-Content ./r36-endpoint-pointer.txt
+            }
+            $globals=Read-Bytes 0x00B0ACF0 0x200
             [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_runtime_globals.bin'),$globals)
+            $objTable=Read-Bytes 0x00B0AE00 0x300
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'endpoint_object_table.bin'),$objTable)
           } finally { [Mem]::CloseHandle($h)|Out-Null }
-          Write-Host 'R36_ACTIVE_ENDPOINT_SLOT=PASS'
+          Write-Host 'R36_ENDPOINT_POINTER_OBJECT=PASS'
 
-      - name: Upload active endpoint metadata
+      - name: Upload endpoint pointer object
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-active-endpoint-slot
+          name: r36-endpoint-pointer-object
           path: |
-            r36-active-endpoint.txt
-            active_endpoint_slot.bin
-            endpoint_object_table.bin
+            r36-endpoint-pointer.txt
+            endpoint_pointer_object.bin
             endpoint_runtime_globals.bin
+            endpoint_object_table.bin
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
