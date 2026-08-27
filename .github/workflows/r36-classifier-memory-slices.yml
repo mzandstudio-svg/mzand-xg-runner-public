@@ -1,4 +1,4 @@
-name: R36.22 XG Classifier Tail Final Enum
+name: R36.23 XG Cube Efficiency Dispatcher Xrefs
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Dump classifier tail
+      - name: Trace direct callers of 0x9DAD30
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -46,27 +46,44 @@ jobs:
           if(-not $proc){throw 'XG process not found'}
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){throw 'OpenProcess failed'}
-          $start=0x006F9800L; $len=0x3400
+          $base=0x00400000L; $end=0x00A10000L; $chunk=0x1000; $target=0x009DAD30L
+          $hits=@()
           try {
-            $buf=New-Object byte[] $len; $got=[IntPtr]::Zero
-            $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($start),$buf,$len,[ref]$got)
-            if(-not $ok -or $got.ToInt64() -le 0){throw 'ReadProcessMemory failed'}
-            $n=[int]$got.ToInt64(); if($n -ne $len){$buf=$buf[0..($n-1)]}
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'classifier_tail_6f9800_from_6f9800.bin'),$buf)
-            "DUMP va=0x$($start.ToString('x')) len=$n" | Tee-Object -FilePath ./r36-classifier-tail.txt
+            for($va=$base; $va -lt $end; $va+=$chunk){
+              $buf=New-Object byte[] $chunk; $got=[IntPtr]::Zero
+              if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$chunk,[ref]$got)){continue}
+              $n=[int]$got.ToInt64()
+              for($i=0;$i -le $n-5;$i++){
+                if($buf[$i] -ne 0xE8){continue}
+                $rel=[BitConverter]::ToInt32($buf,$i+1)
+                $src=$va+$i; $tgt=$src+5+$rel
+                if($tgt -ne $target){continue}
+                $hits += $src
+                "XREF src=0x$($src.ToString('x')) target=0x$($target.ToString('x'))" | Tee-Object -FilePath ./r36-efficiency-xrefs.txt -Append
+                $start=[Math]::Max($base,$src-0x300); $len=0x900
+                $out=New-Object byte[] $len; $got2=[IntPtr]::Zero
+                $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($start),$out,$len,[ref]$got2)
+                if($ok -and $got2.ToInt64() -gt 0){
+                  if($got2.ToInt64() -ne $len){$out=$out[0..([int]$got2.ToInt64()-1)]}
+                  $name="effcaller_$($src.ToString('x'))_from_$($start.ToString('x')).bin"
+                  [IO.File]::WriteAllBytes((Join-Path $PWD $name),$out)
+                  "DUMP name=$name va=0x$($start.ToString('x')) len=$($out.Length)" | Add-Content ./r36-efficiency-xrefs.txt
+                }
+              }
+            }
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-          'TARGET 0x6f9c18' | Add-Content ./r36-classifier-tail.txt
-          'TARGET 0x6fbf1c' | Add-Content ./r36-classifier-tail.txt
-          'R36_CLASSIFIER_TAIL=PASS' | Tee-Object -FilePath ./r36-classifier-tail-summary.txt
-      - name: Upload classifier tail
+          "R36_EFFICIENCY_CALLER_COUNT=$($hits.Count)" | Tee-Object -FilePath ./r36-efficiency-summary.txt
+          if($hits.Count -eq 0){throw 'no direct callers of 0x9DAD30 found'}
+          'R36_EFFICIENCY_XREFS=PASS' | Add-Content ./r36-efficiency-summary.txt
+      - name: Upload efficiency callers
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-xg-classifier-tail-final-enum
+          name: r36-xg-cube-efficiency-dispatcher-xrefs
           path: |
-            classifier_tail_*.bin
-            r36-classifier-tail.txt
-            r36-classifier-tail-summary.txt
+            effcaller_*.bin
+            r36-efficiency-xrefs.txt
+            r36-efficiency-summary.txt
             r35-proven-startup-summary.txt
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 14
