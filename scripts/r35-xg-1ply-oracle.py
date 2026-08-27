@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import ctypes
+import os
 import sys
 import time
 from pathlib import Path
@@ -77,8 +78,6 @@ def extract_raw_cube(path: Path) -> dict:
 
 
 def ctrl_1(hwnd: int) -> None:
-    # Post keyboard messages to XG's own GUI thread. Delphi's accelerator
-    # handling maps Ctrl+1 to the documented 1-ply Evaluation action.
     user32.PostMessageW(hwnd, WM_KEYDOWN, VK_CONTROL, 0)
     user32.PostMessageW(hwnd, WM_KEYDOWN, VK_1, 0)
     user32.PostMessageW(hwnd, WM_KEYUP, VK_1, 0)
@@ -99,12 +98,20 @@ def export_xgp(auto: XGAutomator, out: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--xg-exe", required=True, type=Path)
+    ap.add_argument("--xg-exe", type=Path, default=None)
     ap.add_argument("--input", required=True, type=Path)
     ap.add_argument("--output", required=True, type=Path)
     ap.add_argument("--xgp-dir", required=True, type=Path)
     ap.add_argument("--count", type=int, default=0)
     args = ap.parse_args()
+
+    if args.xg_exe is None:
+        env_path = os.environ.get("XG_EXE") or os.environ.get("xgexe")
+        if not env_path:
+            raise SystemExit("R35 oracle requires --xg-exe or XG_EXE/xgexe environment variable")
+        args.xg_exe = Path(env_path)
+    if not args.xg_exe.exists():
+        raise SystemExit(f"XG executable not found: {args.xg_exe}")
 
     with args.input.open("r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
