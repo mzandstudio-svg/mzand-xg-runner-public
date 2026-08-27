@@ -1,4 +1,4 @@
-name: R36.17 XG Endpoint Caller Body
+name: R36.18 XG Endpoint Top Caller Xrefs
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Dump caller body and xrefs
+      - name: Find callers of 0x9DC770 and dump bodies
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -46,27 +46,45 @@ jobs:
           if(-not $proc){throw 'XG process not found'}
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){throw 'OpenProcess failed'}
-          function Dump([string]$name,[Int64]$va,[int]$len){
-            $buf=New-Object byte[] $len; $got=[IntPtr]::Zero
-            $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$len,[ref]$got)
-            if(-not $ok -or $got.ToInt64() -ne $len){throw "ReadProcessMemory failed $name got=$($got.ToInt64())"}
-            [IO.File]::WriteAllBytes((Join-Path $PWD "$name.bin"),$buf)
-            "R36_BINARY name=$name va=0x$($va.ToString('x')) len=$len" | Add-Content ./r36-caller-body.txt
-          }
+          $base=0x00400000L; $end=0x00A10000L; $chunk=0x1000; $target=0x009DC770L
+          $hits=@()
           try {
-            Dump 'endpoint_caller_9db800' 0x009DB800 0x1000
-            Dump 'endpoint_caller_prev_9db000' 0x009DB000 0x800
+            for($va=$base; $va -lt $end; $va+=$chunk){
+              $buf=New-Object byte[] $chunk; $got=[IntPtr]::Zero
+              if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$chunk,[ref]$got)){continue}
+              $n=[int]$got.ToInt64()
+              for($i=0;$i -le $n-5;$i++){
+                if($buf[$i] -ne 0xE8){continue}
+                $rel=[BitConverter]::ToInt32($buf,$i+1)
+                $src=$va+$i; $tgt=$src+5+$rel
+                if($tgt -ne $target){continue}
+                $hits += $src
+                "XREF src=0x$($src.ToString('x')) target=0x$($target.ToString('x'))" | Tee-Object -FilePath ./r36-top-xrefs.txt -Append
+                $start=[Math]::Max($base,$src-0x200)
+                $len=0x600
+                $out=New-Object byte[] $len; $got2=[IntPtr]::Zero
+                $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($start),$out,$len,[ref]$got2)
+                if($ok -and $got2.ToInt64() -gt 0){
+                  if($got2.ToInt64() -ne $len){$out=$out[0..([int]$got2.ToInt64()-1)]}
+                  $name="topcaller_$($src.ToString('x'))_from_$($start.ToString('x')).bin"
+                  [IO.File]::WriteAllBytes((Join-Path $PWD $name),$out)
+                  "DUMP name=$name va=0x$($start.ToString('x')) len=$($out.Length)" | Add-Content ./r36-top-xrefs.txt
+                }
+              }
+            }
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-          Write-Host 'R36_ENDPOINT_CALLER_BODY=PASS'
-      - name: Upload caller body
+          if($hits.Count -eq 0){throw 'no callers of 0x9DC770 found'}
+          "R36_TOP_CALLER_COUNT=$($hits.Count)" | Tee-Object -FilePath ./r36-top-summary.txt
+          Write-Host 'R36_ENDPOINT_TOP_CALLERS=PASS'
+      - name: Upload top callers
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-endpoint-caller-body
+          name: r36-endpoint-top-callers
           path: |
-            endpoint_caller_9db800.bin
-            endpoint_caller_prev_9db000.bin
-            r36-caller-body.txt
+            topcaller_*.bin
+            r36-top-xrefs.txt
+            r36-top-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
