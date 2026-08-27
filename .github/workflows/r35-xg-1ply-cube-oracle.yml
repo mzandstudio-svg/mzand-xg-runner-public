@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/r35-xg-1ply-cube-oracle.yml
       - scripts/r35-xg-1ply-oracle.py
+      - scripts/r35-proven-startup.ps1
       - corpus/r35-xg-oracle-corpus.tsv
   workflow_dispatch:
 
@@ -61,19 +62,38 @@ jobs:
           }
           Write-Host 'R35_CORPUS_CONTRACT=PASS'
 
+      - name: Reach proven ready XG instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
       - name: Smoke exact 1-ply oracle on first three contexts
         shell: powershell
         run: |
-          $ErrorActionPreference='Continue'
-          python ./scripts/r35-xg-1ply-oracle.py `
-            --xg-exe "$env:XG_EXE" `
-            --input ./corpus/r35-xg-oracle-corpus.tsv `
-            --output ./r35-smoke.tsv `
-            --xgp-dir ./r35-smoke-xgp `
-            --count 3
-          $rc=$LASTEXITCODE
-          if(Test-Path ./r35-smoke.tsv){Get-Content ./r35-smoke.tsv}
-          if($rc-ne0){throw "R35 smoke failed; exact Level=0 oracle was not proven"}
+          $ErrorActionPreference='Stop'
+          $out=Join-Path $env:GITHUB_WORKSPACE 'r35-smoke-stdout.txt'
+          $err=Join-Path $env:GITHUB_WORKSPACE 'r35-smoke-stderr.txt'
+          $args=@(
+            './scripts/r35-xg-1ply-oracle.py',
+            '--xg-exe', $env:XG_EXE,
+            '--input', './corpus/r35-xg-oracle-corpus.tsv',
+            '--output', './r35-smoke.tsv',
+            '--xgp-dir', './r35-smoke-xgp',
+            '--count', '3'
+          )
+          $p=Start-Process python -ArgumentList $args -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          try { Wait-Process -Id $p.Id -Timeout 150 -ErrorAction Stop }
+          catch {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+            if(Test-Path $out){Get-Content $out}
+            if(Test-Path $err){Get-Content $err}
+            Get-Process|Where-Object{$_.ProcessName-match'extreme|test3d'}|Format-List *|Out-File ./r35-smoke-processes.txt
+            throw 'R35 smoke watchdog timeout at 150 seconds'
+          }
+          $p.Refresh()
+          if(Test-Path $out){Get-Content $out}
+          if(Test-Path $err){Get-Content $err}
+          if($p.ExitCode-ne0){throw "R35 smoke failed rc=$($p.ExitCode)"}
+          if(-not(Test-Path ./r35-smoke.tsv)){throw 'Smoke TSV missing'}
           $rows=Import-Csv ./r35-smoke.tsv -Delimiter "`t"
           if($rows.Count-ne3){throw "Expected 3 smoke rows"}
           if(@($rows|Where-Object {$_.status-ne'PASS' -or $_.level-ne'0'}).Count-ne0){throw 'Smoke contains non-Level=0 result'}
@@ -109,6 +129,11 @@ jobs:
             R35-XG-1PLY-ORACLE.tsv
             r35-summary.txt
             r35-smoke.tsv
+            r35-smoke-stdout.txt
+            r35-smoke-stderr.txt
+            r35-smoke-processes.txt
+            r35-proven-startup-report.txt
+            r35-proven-startup-summary.txt
             r35-xg-install.log
             r35-smoke-xgp/*.xgp
             r35-xgp/*.xgp
