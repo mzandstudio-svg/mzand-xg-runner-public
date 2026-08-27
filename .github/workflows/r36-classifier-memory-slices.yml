@@ -1,4 +1,4 @@
-name: R36.7 XG Cube Dispatcher Xrefs
+name: R36.8 XG Cube Caller Bodies
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Find dispatcher callers
+      - name: Dump full caller bodies
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -51,51 +51,28 @@ jobs:
           if(-not $proc){ throw 'XG process not found after proven startup' }
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){ throw 'OpenProcess failed' }
-
-          # Confirm the final-classifier override gate while the real XG process is ready.
-          $gate=New-Object byte[] 4
-          $gateGot=[IntPtr]::Zero
-          $gateOk=[Mem]::ReadProcessMemory($h,[IntPtr]::new(0x00A0D700),$gate,4,[ref]$gateGot)
-          if($gateOk){
-            $gateHex=($gate|ForEach-Object{$_.ToString('x2')})-join''
-            $line="R36_GLOBAL va=0xa0d700 hex=$gateHex"
-            Add-Content ./r36-cube-xrefs.txt $line; Write-Host $line
+          function Dump-Range([string]$name,[Int64]$va,[int]$len) {
+            $buf=New-Object byte[] $len
+            $got=[IntPtr]::Zero
+            $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$len,[ref]$got)
+            if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
+            $hex=($buf|ForEach-Object{$_.ToString('x2')})-join''
+            $line="R36_RANGE name=$name va=0x$($va.ToString('x')) len=$len hex=$hex"
+            Add-Content ./r36-cube-callers.txt $line; Write-Host $line
           }
+          try {
+            Dump-Range 'caller1_body' 0x009DC600 0x700
+            Dump-Range 'caller2_body' 0x009DCC00 0x500
+          } finally { [Mem]::CloseHandle($h)|Out-Null }
+          Write-Host 'R36_CUBE_CALLER_BODIES=PASS'
 
-          $base=[Int64]0x00400000
-          $len=0x00600000
-          $buf=New-Object byte[] $len
-          $got=[IntPtr]::Zero
-          $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($base),$buf,$len,[ref]$got)
-          if(-not $ok){ throw "ReadProcessMemory image failed got=$($got.ToInt64())" }
-          $targets=@([Int64]0x009DAD30,[Int64]0x009DA8C0)
-          foreach($t in $targets){
-            for($i=0;$i -le $got.ToInt64()-5;$i++){
-              if($buf[$i] -ne 0xE8){ continue }
-              $rel=[BitConverter]::ToInt32($buf,$i+1)
-              $src=$base+[Int64]$i
-              $dst=$src+5+[Int64]$rel
-              if($dst -ne $t){ continue }
-              $lo=[Math]::Max(0,$i-80); $hi=[Math]::Min($got.ToInt64(),$i+128)
-              $slice=New-Object byte[] ($hi-$lo)
-              [Array]::Copy($buf,$lo,$slice,0,$slice.Length)
-              $hex=($slice|ForEach-Object{$_.ToString('x2')})-join''
-              $sliceVa=$base+[Int64]$lo
-              $line="R36_XREF target=0x$($t.ToString('x')) call=0x$($src.ToString('x')) slice_va=0x$($sliceVa.ToString('x')) hex=$hex"
-              Add-Content ./r36-cube-xrefs.txt $line
-              Write-Host $line
-            }
-          }
-          [Mem]::CloseHandle($h)|Out-Null
-          Write-Host 'R36_CUBE_XREFS=PASS'
-
-      - name: Upload xrefs
+      - name: Upload callers
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-cube-xrefs
+          name: r36-cube-callers
           path: |
-            r36-cube-xrefs.txt
+            r36-cube-callers.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
