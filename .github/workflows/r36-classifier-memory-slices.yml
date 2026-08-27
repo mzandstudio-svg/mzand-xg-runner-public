@@ -57,16 +57,14 @@ jobs:
             try {
               $base=[uint32]$mem.ToInt64(); $state=$base; $clsout=$base+0x100; $effout=$base+0x108; $code=$base+0x200
               $st=New-Object byte[] 0x60
-              for($i=0;$i-lt26;$i++){$st[$i]=[byte]([sbyte]$p[$i])}
+              for($i=0;$i-lt26;$i++){$st[$i]=[byte]($p[$i] -band 0xff)}
               PutI32 $st 0x20 -1; PutI32 $st 0x24 -1; PutI32 $st 0x28 1; PutI32 $st 0x2c 0; PutI32 $st 0x30 1; PutI32 $st 0x34 0
               $w=[IntPtr]::Zero
               if(-not[R]::WriteProcessMemory($h,[IntPtr]::new([long]$state),$st,$st.Length,[ref]$w)){throw 'write state failed'}
               $c=New-Object 'System.Collections.Generic.List[byte]'
-              # classifier: mov eax,state; call 6f9580; mov [clsout],eax
               $c.Add(0xB8); $c.AddRange((U32 $state))
               $src=$code+[uint32]$c.Count; $rel=[int](0x006F9580L-([long]$src+5)); $c.Add(0xE8); $c.AddRange((I32 $rel))
               $c.Add(0xA3); $c.AddRange((U32 $clsout))
-              # dispatcher: edx=state, ecx=1, push flag, push 1, eax=0, call 9dad30, fstp qword [effout], ret
               $c.Add(0xBA); $c.AddRange((U32 $state)); $c.Add(0xB9); $c.AddRange((U32 1)); $c.Add(0x6A); $c.Add($flag); $c.Add(0x6A); $c.Add(1); $c.Add(0x31); $c.Add(0xC0)
               $src=$code+[uint32]$c.Count; $rel=[int](0x009DAD30L-([long]$src+5)); $c.Add(0xE8); $c.AddRange((I32 $rel))
               $c.Add(0xDD); $c.Add(0x1D); $c.AddRange((U32 $effout)); $c.Add(0xC3)
