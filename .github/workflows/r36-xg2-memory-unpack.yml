@@ -1,0 +1,73 @@
+name: R36 XG2 Memory Unpack
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r36-xg2-memory-unpack.yml
+      - scripts/r36-dump-unpacked-xg.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unpack:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven ready unpacked XG2 instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
+      - name: Dump in-memory unpacked process image
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          python ./scripts/r36-dump-unpacked-xg.py `
+            --pid $xg.Id `
+            --exe "$env:XG_EXE" `
+            --outdir ./r36-unpacked
+          Get-Content ./r36-unpacked/r36-delphi-method-rtti.txt
+          Get-Content ./r36-unpacked/r36-string-addresses.tsv | Select-Object -First 100
+
+      - name: Disassemble rebuilt unpacked image around candidate code
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          $llvm=(Get-Command llvm-objdump.exe -ErrorAction SilentlyContinue).Source
+          if($llvm){
+            & $llvm -d --x86-asm-syntax=intel ./r36-unpacked/eXtremeGammon2-unpacked-rebuilt.exe *> ./r36-unpacked/r36-disassembly.txt
+          } else {
+            'llvm-objdump unavailable' | Out-File ./r36-unpacked/r36-disassembly.txt
+          }
+          Get-FileHash -Algorithm SHA256 ./r36-unpacked/eXtremeGammon2-unpacked-rebuilt.exe | Out-File ./r36-unpacked/r36-rebuilt-sha256.txt
+
+      - name: Upload unpacked reverse-engineering evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r36-xg2-unpacked-memory
+          path: |
+            r36-unpacked/*
+            r35-proven-startup-report.txt
+            r35-proven-startup-summary.txt
+          if-no-files-found: warn
+          retention-days: 14
