@@ -1,4 +1,4 @@
-name: R36.3 XG Cube Dispatcher Memory Slice
+name: R36.4 XG Cube Helper Memory Slices
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump cube dispatcher bytes
+      - name: Dump cube helper bytes
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -58,22 +58,23 @@ jobs:
             if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
             $hex=($buf | ForEach-Object { $_.ToString('x2') }) -join ''
             $line="R36_RANGE name=$name va=0x$($va.ToString('x')) len=$len hex=$hex"
-            Add-Content -Path ./r36-cube-dispatcher.txt -Value $line
+            Add-Content -Path ./r36-cube-helpers.txt -Value $line
             Write-Host $line
           }
           try {
-            Dump-Range 'cube_core' 0x009DA780 0x900
-            Dump-Range 'cube_flags' 0x00A12620 0x20
+            Dump-Range 'race_metric_side' 0x009D7B80 0x180
+            Dump-Range 'race_metric_combine' 0x00463980 0x140
+            Dump-Range 'classifier_metric' 0x007006C0 0x180
           } finally { [Mem]::CloseHandle($h) | Out-Null }
-          Write-Host 'R36_CUBE_DISPATCHER_SLICE=PASS'
+          Write-Host 'R36_CUBE_HELPER_SLICES=PASS'
 
       - name: Upload slice
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-cube-dispatcher-slice
+          name: r36-cube-helper-slices
           path: |
-            r36-cube-dispatcher.txt
+            r36-cube-helpers.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
