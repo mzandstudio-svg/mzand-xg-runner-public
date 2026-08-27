@@ -1,4 +1,4 @@
-name: R36.1 XG Classifier Memory Slices
+name: R36.2 XG Base Classifier Memory Slice
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump unpacked classifier bytes
+      - name: Dump base classifier bytes
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -49,7 +49,6 @@ jobs:
           '@
           $proc=Get-Process | Where-Object { $_.ProcessName -match 'eXtremeGammon2|ExtremeGammon2' } | Select-Object -First 1
           if(-not $proc){ throw 'XG process not found after proven startup' }
-          Write-Host ("R36_PID={0}" -f $proc.Id)
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){ throw 'OpenProcess failed' }
           function Dump-Range([string]$name,[UInt64]$va,[int]$len) {
@@ -59,24 +58,21 @@ jobs:
             if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
             $hex=($buf | ForEach-Object { $_.ToString('x2') }) -join ''
             $line="R36_RANGE name=$name va=0x$($va.ToString('x')) len=$len hex=$hex"
-            Add-Content -Path ./r36-classifier-ranges.txt -Value $line
+            Add-Content -Path ./r36-base-classifier.txt -Value $line
             Write-Host $line
           }
           try {
-            Dump-Range 'classifier_wrapper' 0x006F9580 0x80
-            Dump-Range 'classifier_prepare' 0x006F9C18 0xC00
-            Dump-Range 'classifier_final' 0x006FBF1C 0xA00
+            Dump-Range 'classifier_base' 0x006FB900 0x620
           } finally { [Mem]::CloseHandle($h) | Out-Null }
-          Write-Host 'R36_CLASSIFIER_MEMORY_SLICES=PASS'
+          Write-Host 'R36_BASE_CLASSIFIER_SLICE=PASS'
 
-      - name: Upload slices
+      - name: Upload slice
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-classifier-memory-slices
+          name: r36-base-classifier-slice
           path: |
-            r36-classifier-ranges.txt
-            r35-proven-startup-report.txt
+            r36-base-classifier.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
