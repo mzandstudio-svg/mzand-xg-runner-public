@@ -1,0 +1,116 @@
+name: R35 XG 1-ply Cube Oracle
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r35-xg-1ply-cube-oracle.yml
+      - scripts/r35-xg-1ply-oracle.py
+      - corpus/r35-xg-oracle-corpus.tsv
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install eXtreme Gammon from official installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'r35-xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          Get-FileHash -Algorithm SHA256 $exe
+
+      - name: Prepare Python XG automation parser
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ag=Join-Path $env:RUNNER_TEMP 'AnkiGammon'
+          git clone --depth 1 https://github.com/Deinonychus999/AnkiGammon.git $ag
+          python -m pip install --upgrade pip
+          python -m pip install -e $ag
+          python -m pip install pywinauto pyautogui pymem
+
+      - name: Validate corpus contract
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $rows=Import-Csv ./corpus/r35-xg-oracle-corpus.tsv -Delimiter "`t"
+          if($rows.Count-ne204){throw "Expected 204 rows, got $($rows.Count)"}
+          $groups=$rows.group|Sort-Object -Unique
+          if($groups.Count-ne68){throw "Expected 68 groups, got $($groups.Count)"}
+          foreach($g in $groups){
+            $r=@($rows|Where-Object {$_.group-eq$g})
+            if($r.Count-ne3){throw "Group $g does not contain three cube contexts"}
+            foreach($x in $r){
+              if($x.plus_count-ne'15' -or $x.minus_count-ne'15'){throw "Checker count contract failed: $($x.id)"}
+            }
+          }
+          Write-Host 'R35_CORPUS_CONTRACT=PASS'
+
+      - name: Smoke exact 1-ply oracle on first three contexts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          python ./scripts/r35-xg-1ply-oracle.py `
+            --xg-exe "$env:XG_EXE" `
+            --input ./corpus/r35-xg-oracle-corpus.tsv `
+            --output ./r35-smoke.tsv `
+            --xgp-dir ./r35-smoke-xgp `
+            --count 3
+          $rc=$LASTEXITCODE
+          if(Test-Path ./r35-smoke.tsv){Get-Content ./r35-smoke.tsv}
+          if($rc-ne0){throw "R35 smoke failed; exact Level=0 oracle was not proven"}
+          $rows=Import-Csv ./r35-smoke.tsv -Delimiter "`t"
+          if($rows.Count-ne3){throw "Expected 3 smoke rows"}
+          if(@($rows|Where-Object {$_.status-ne'PASS' -or $_.level-ne'0'}).Count-ne0){throw 'Smoke contains non-Level=0 result'}
+          Write-Host 'R35_SMOKE_EXACT_1PLY=PASS'
+
+      - name: Capture all 204 exact XG 1-ply cube samples
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          python ./scripts/r35-xg-1ply-oracle.py `
+            --xg-exe "$env:XG_EXE" `
+            --input ./corpus/r35-xg-oracle-corpus.tsv `
+            --output ./R35-XG-1PLY-ORACLE.tsv `
+            --xgp-dir ./r35-xgp
+          $rc=$LASTEXITCODE
+          if(Test-Path ./R35-XG-1PLY-ORACLE.tsv){
+            $rows=Import-Csv ./R35-XG-1PLY-ORACLE.tsv -Delimiter "`t"
+            $pass=@($rows|Where-Object {$_.status-eq'PASS' -and $_.level-eq'0'}).Count
+            $fail=@($rows|Where-Object {$_.status-ne'PASS' -or $_.level-ne'0'}).Count
+            "TOTAL=$($rows.Count) PASS=$pass FAIL=$fail" | Out-File ./r35-summary.txt
+            Get-Content ./r35-summary.txt
+          }
+          if($rc-ne0){throw "R35 full oracle failed"}
+          if($pass-ne204 -or $fail-ne0){throw "Exact 1-ply corpus incomplete"}
+          Write-Host 'R35_XG_1PLY_ORACLE_204=PASS'
+
+      - name: Upload R35 oracle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r35-xg-1ply-cube-oracle
+          path: |
+            R35-XG-1PLY-ORACLE.tsv
+            r35-summary.txt
+            r35-smoke.tsv
+            r35-xg-install.log
+            r35-smoke-xgp/*.xgp
+            r35-xgp/*.xgp
+          if-no-files-found: ignore
+          retention-days: 14
