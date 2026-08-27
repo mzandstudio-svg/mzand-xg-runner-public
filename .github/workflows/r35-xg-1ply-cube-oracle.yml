@@ -75,7 +75,6 @@ jobs:
           $err=Join-Path $env:GITHUB_WORKSPACE 'r35-smoke-stderr.txt'
           $args=@(
             './scripts/r35-xg-1ply-oracle.py',
-            '--xg-exe', $env:XG_EXE,
             '--input', './corpus/r35-xg-oracle-corpus.tsv',
             '--output', './r35-smoke.tsv',
             '--xgp-dir', './r35-smoke-xgp',
@@ -105,7 +104,6 @@ jobs:
         run: |
           $ErrorActionPreference='Continue'
           python ./scripts/r35-xg-1ply-oracle.py `
-            --xg-exe "$env:XG_EXE" `
             --input ./corpus/r35-xg-oracle-corpus.tsv `
             --output ./R35-XG-1PLY-ORACLE.tsv `
             --xgp-dir ./r35-xgp
