@@ -1,4 +1,4 @@
-name: R36.23 XG Cube Efficiency Dispatcher Xrefs
+name: R36.24 XG Cube Context Pair Table
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Trace direct callers of 0x9DAD30
+      - name: Dump cube context pair table
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -46,44 +46,32 @@ jobs:
           if(-not $proc){throw 'XG process not found'}
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){throw 'OpenProcess failed'}
-          $base=0x00400000L; $end=0x00A10000L; $chunk=0x1000; $target=0x009DAD30L
-          $hits=@()
           try {
-            for($va=$base; $va -lt $end; $va+=$chunk){
-              $buf=New-Object byte[] $chunk; $got=[IntPtr]::Zero
-              if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$chunk,[ref]$got)){continue}
-              $n=[int]$got.ToInt64()
-              for($i=0;$i -le $n-5;$i++){
-                if($buf[$i] -ne 0xE8){continue}
-                $rel=[BitConverter]::ToInt32($buf,$i+1)
-                $src=$va+$i; $tgt=$src+5+$rel
-                if($tgt -ne $target){continue}
-                $hits += $src
-                "XREF src=0x$($src.ToString('x')) target=0x$($target.ToString('x'))" | Tee-Object -FilePath ./r36-efficiency-xrefs.txt -Append
-                $start=[Math]::Max($base,$src-0x300); $len=0x900
-                $out=New-Object byte[] $len; $got2=[IntPtr]::Zero
-                $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($start),$out,$len,[ref]$got2)
-                if($ok -and $got2.ToInt64() -gt 0){
-                  if($got2.ToInt64() -ne $len){$out=$out[0..([int]$got2.ToInt64()-1)]}
-                  $name="effcaller_$($src.ToString('x'))_from_$($start.ToString('x')).bin"
-                  [IO.File]::WriteAllBytes((Join-Path $PWD $name),$out)
-                  "DUMP name=$name va=0x$($start.ToString('x')) len=$($out.Length)" | Add-Content ./r36-efficiency-xrefs.txt
-                }
-              }
+            $base=0x00B0AD70L; $len=0x1000
+            $buf=New-Object byte[] $len; $got=[IntPtr]::Zero
+            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($base),$buf,$len,[ref]$got)){throw 'pair table read failed'}
+            if($got.ToInt64() -lt 8){throw 'pair table short read'}
+            if($got.ToInt64() -ne $len){$buf=$buf[0..([int]$got.ToInt64()-1)]}
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'cube_context_pairs_b0ad70.bin'),$buf)
+            'INDEX\tLEFT\tRIGHT' | Out-File ./cube_context_pairs.txt -Encoding ascii
+            $pairs=[Math]::Floor($buf.Length/8)
+            for($i=0;$i -lt $pairs;$i++){
+              $a=[BitConverter]::ToInt32($buf,$i*8)
+              $b=[BitConverter]::ToInt32($buf,$i*8+4)
+              "$i`t$a`t$b" | Add-Content ./cube_context_pairs.txt -Encoding ascii
             }
+            "R36_PAIR_COUNT=$pairs" | Out-File ./r36-context-summary.txt -Encoding ascii
+            'R36_CUBE_CONTEXT_PAIR_TABLE=PASS' | Add-Content ./r36-context-summary.txt -Encoding ascii
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-          "R36_EFFICIENCY_CALLER_COUNT=$($hits.Count)" | Tee-Object -FilePath ./r36-efficiency-summary.txt
-          if($hits.Count -eq 0){throw 'no direct callers of 0x9DAD30 found'}
-          'R36_EFFICIENCY_XREFS=PASS' | Add-Content ./r36-efficiency-summary.txt
-      - name: Upload efficiency callers
+      - name: Upload cube context evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-xg-cube-efficiency-dispatcher-xrefs
+          name: r36-xg-cube-context-pair-table
           path: |
-            effcaller_*.bin
-            r36-efficiency-xrefs.txt
-            r36-efficiency-summary.txt
+            cube_context_pairs_b0ad70.bin
+            cube_context_pairs.txt
+            r36-context-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
