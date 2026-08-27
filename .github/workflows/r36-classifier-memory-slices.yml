@@ -1,4 +1,4 @@
-name: R36.8 XG Cube Caller Bodies
+name: R36.9 XG Cube Endpoint Builders
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump full caller bodies
+      - name: Dump endpoint builders
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -58,21 +58,22 @@ jobs:
             if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
             $hex=($buf|ForEach-Object{$_.ToString('x2')})-join''
             $line="R36_RANGE name=$name va=0x$($va.ToString('x')) len=$len hex=$hex"
-            Add-Content ./r36-cube-callers.txt $line; Write-Host $line
+            Add-Content ./r36-cube-endpoints.txt $line; Write-Host $line
           }
           try {
-            Dump-Range 'caller1_body' 0x009DC600 0x700
-            Dump-Range 'caller2_body' 0x009DCC00 0x500
+            Dump-Range 'endpoint_eval' 0x009D5B80 0x500
+            Dump-Range 'endpoint_surface' 0x009DB900 0x700
+            Dump-Range 'surface_interp' 0x009DC620 0x150
           } finally { [Mem]::CloseHandle($h)|Out-Null }
-          Write-Host 'R36_CUBE_CALLER_BODIES=PASS'
+          Write-Host 'R36_CUBE_ENDPOINT_BUILDERS=PASS'
 
-      - name: Upload callers
+      - name: Upload endpoint builders
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-cube-callers
+          name: r36-cube-endpoint-builders
           path: |
-            r36-cube-callers.txt
+            r36-cube-endpoints.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
