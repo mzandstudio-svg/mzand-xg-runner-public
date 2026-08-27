@@ -1,4 +1,4 @@
-name: R36.24 XG Cube Context Pair Table
+name: R36.25 XG State Initializers and Classifier Rank Globals
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Dump cube context pair table
+      - name: Dump state initializers and rank globals
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -46,32 +46,35 @@ jobs:
           if(-not $proc){throw 'XG process not found'}
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){throw 'OpenProcess failed'}
-          try {
-            $base=0x00B0AD70L; $len=0x1000
+          function Dump([long]$va,[int]$len,[string]$name){
             $buf=New-Object byte[] $len; $got=[IntPtr]::Zero
-            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($base),$buf,$len,[ref]$got)){throw 'pair table read failed'}
-            if($got.ToInt64() -lt 8){throw 'pair table short read'}
+            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$len,[ref]$got)){throw "read failed $name"}
+            if($got.ToInt64() -le 0){throw "short read $name"}
             if($got.ToInt64() -ne $len){$buf=$buf[0..([int]$got.ToInt64()-1)]}
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'cube_context_pairs_b0ad70.bin'),$buf)
-            'INDEX\tLEFT\tRIGHT' | Out-File ./cube_context_pairs.txt -Encoding ascii
-            $pairs=[Math]::Floor($buf.Length/8)
-            for($i=0;$i -lt $pairs;$i++){
-              $a=[BitConverter]::ToInt32($buf,$i*8)
-              $b=[BitConverter]::ToInt32($buf,$i*8+4)
-              "$i`t$a`t$b" | Add-Content ./cube_context_pairs.txt -Encoding ascii
-            }
-            "R36_PAIR_COUNT=$pairs" | Out-File ./r36-context-summary.txt -Encoding ascii
-            'R36_CUBE_CONTEXT_PAIR_TABLE=PASS' | Add-Content ./r36-context-summary.txt -Encoding ascii
+            [IO.File]::WriteAllBytes((Join-Path $PWD $name),$buf)
+            "DUMP $name VA=0x$($va.ToString('x')) LEN=$($buf.Length)" | Add-Content ./r36-state-rank-summary.txt -Encoding ascii
+          }
+          try {
+            Dump 0x009D4000 0x3000 'state_init_9d4000.bin'
+            Dump 0x00A0EC60 0x40 'rank_globals_a0ec60.bin'
+            Dump 0x00B04068 0x1000 'rank_table_b04068.bin'
+            $g=New-Object byte[] 8; $got=[IntPtr]::Zero
+            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new(0x00A0EC70),$g,8,[ref]$got)){throw 'rank globals read failed'}
+            $g0=[BitConverter]::ToInt32($g,0); $g1=[BitConverter]::ToInt32($g,4)
+            "A0EC70=$g0" | Add-Content ./r36-state-rank-summary.txt -Encoding ascii
+            "A0EC74=$g1" | Add-Content ./r36-state-rank-summary.txt -Encoding ascii
+            'R36_STATE_INITIALIZERS_RANK_GLOBALS=PASS' | Add-Content ./r36-state-rank-summary.txt -Encoding ascii
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-      - name: Upload cube context evidence
+      - name: Upload state/rank evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-xg-cube-context-pair-table
+          name: r36-xg-state-init-rank-globals
           path: |
-            cube_context_pairs_b0ad70.bin
-            cube_context_pairs.txt
-            r36-context-summary.txt
+            state_init_9d4000.bin
+            rank_globals_a0ec60.bin
+            rank_table_b04068.bin
+            r36-state-rank-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
