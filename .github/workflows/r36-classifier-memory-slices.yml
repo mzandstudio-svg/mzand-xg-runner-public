@@ -1,4 +1,4 @@
-name: R36.19 XG Endpoint Wrapper Callers
+name: R36.20 XG Cube Dispatcher Helper Ranges
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Find callers of endpoint wrapper
+      - name: Dump dispatcher helper ranges
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -46,45 +46,43 @@ jobs:
           if(-not $proc){throw 'XG process not found'}
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){throw 'OpenProcess failed'}
-          $base=0x00400000L; $end=0x00A10000L; $chunk=0x1000
-          $targets=@(0x009DD030L,0x009DC770L)
-          $hits=@()
+          $ranges=@(
+            @{Name='cube_eval_9d7000'; Start=0x009D7000L; Len=0x5000},
+            @{Name='helper_463000'; Start=0x00463000L; Len=0x2000},
+            @{Name='cube_slot_6ff000'; Start=0x006FF000L; Len=0x3000}
+          )
+          $summary=@()
           try {
-            for($va=$base; $va -lt $end; $va+=$chunk){
-              $buf=New-Object byte[] $chunk; $got=[IntPtr]::Zero
-              if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$chunk,[ref]$got)){continue}
-              $n=[int]$got.ToInt64()
-              for($i=0;$i -le $n-5;$i++){
-                if($buf[$i] -ne 0xE8){continue}
-                $rel=[BitConverter]::ToInt32($buf,$i+1)
-                $src=$va+$i; $tgt=$src+5+$rel
-                if($targets -notcontains $tgt){continue}
-                $hits += $src
-                "XREF src=0x$($src.ToString('x')) target=0x$($tgt.ToString('x'))" | Tee-Object -FilePath ./r36-wrapper-xrefs.txt -Append
-                $start=[Math]::Max($base,$src-0x300); $len=0x900
-                $out=New-Object byte[] $len; $got2=[IntPtr]::Zero
-                $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($start),$out,$len,[ref]$got2)
-                if($ok -and $got2.ToInt64() -gt 0){
-                  if($got2.ToInt64() -ne $len){$out=$out[0..([int]$got2.ToInt64()-1)]}
-                  $name="wrappercaller_$($src.ToString('x'))_to_$($tgt.ToString('x'))_from_$($start.ToString('x')).bin"
-                  [IO.File]::WriteAllBytes((Join-Path $PWD $name),$out)
-                  "DUMP name=$name va=0x$($start.ToString('x')) len=$($out.Length)" | Add-Content ./r36-wrapper-xrefs.txt
-                }
-              }
+            foreach($r in $ranges){
+              $buf=New-Object byte[] $r.Len; $got=[IntPtr]::Zero
+              $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new([long]$r.Start),$buf,[int]$r.Len,[ref]$got)
+              if(-not $ok -or $got.ToInt64() -le 0){throw "ReadProcessMemory failed for $($r.Name)"}
+              $n=[int]$got.ToInt64(); if($n -ne $r.Len){$buf=$buf[0..($n-1)]}
+              $file="$($r.Name)_from_$(([long]$r.Start).ToString('x')).bin"
+              [IO.File]::WriteAllBytes((Join-Path $PWD $file),$buf)
+              $line="DUMP name=$file va=0x$(([long]$r.Start).ToString('x')) len=$n"
+              $line | Tee-Object -FilePath ./r36-helper-ranges.txt -Append
+              $summary += $line
             }
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-          if($hits.Count -eq 0){throw 'no wrapper callers found'}
-          "R36_WRAPPER_CALLER_COUNT=$($hits.Count)" | Tee-Object -FilePath ./r36-wrapper-summary.txt
-          Write-Host 'R36_ENDPOINT_WRAPPER_CALLERS=PASS'
-      - name: Upload wrapper callers
+          'TARGET 0x9d7c10' | Add-Content ./r36-helper-ranges.txt
+          'TARGET 0x9da770' | Add-Content ./r36-helper-ranges.txt
+          'TARGET 0x9daa40' | Add-Content ./r36-helper-ranges.txt
+          'TARGET 0x9daba0' | Add-Content ./r36-helper-ranges.txt
+          'TARGET 0x9dac90' | Add-Content ./r36-helper-ranges.txt
+          'TARGET 0x463a00' | Add-Content ./r36-helper-ranges.txt
+          'TARGET 0x6fffec' | Add-Content ./r36-helper-ranges.txt
+          'TARGET 0x70074c' | Add-Content ./r36-helper-ranges.txt
+          'R36_HELPER_RANGES=PASS' | Tee-Object -FilePath ./r36-helper-summary.txt
+      - name: Upload dispatcher helpers
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-endpoint-wrapper-callers
+          name: r36-cube-dispatcher-helper-ranges
           path: |
-            wrappercaller_*.bin
-            r36-wrapper-xrefs.txt
-            r36-wrapper-summary.txt
+            *_from_*.bin
+            r36-helper-ranges.txt
+            r36-helper-summary.txt
             r35-proven-startup-summary.txt
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 14
