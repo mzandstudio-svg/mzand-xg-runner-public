@@ -33,6 +33,7 @@ jobs:
           $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
           if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
           "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
           Get-FileHash -Algorithm SHA256 $exe
 
       - name: Prepare Python XG automation parser
