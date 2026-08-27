@@ -1,4 +1,4 @@
-name: R36.11 XG Money Endpoint Helper Closure
+name: R36.12 XG MET Table Closure
 
 on:
   push:
@@ -26,7 +26,7 @@ jobs:
           $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
           if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
           $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
-          if(-not(Test-Path $exe)){throw "XG missing"}
+          if(-not(Test-Path $exe)){throw 'XG missing'}
           "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
           "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
 
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump endpoint helper closure
+      - name: Dump MET backing tables
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -51,30 +51,32 @@ jobs:
           if(-not $proc){ throw 'XG process not found after proven startup' }
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){ throw 'OpenProcess failed' }
-          function Dump-Range([string]$name,[Int64]$va,[int]$len) {
+          function Dump-Binary([string]$name,[Int64]$va,[int]$len) {
             $buf=New-Object byte[] $len
             $got=[IntPtr]::Zero
             $ok=[Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$buf,$len,[ref]$got)
             if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
-            $hex=($buf|ForEach-Object{$_.ToString('x2')})-join''
-            $line="R36_RANGE name=$name va=0x$($va.ToString('x')) len=$len hex=$hex"
-            Add-Content ./r36-money-helper-closure.txt $line; Write-Host $line
+            [IO.File]::WriteAllBytes((Join-Path $PWD "$name.bin"),$buf)
+            $sha=(Get-FileHash "$name.bin" -Algorithm SHA256).Hash.ToLower()
+            "R36_BINARY name=$name va=0x$($va.ToString('x')) len=$len sha256=$sha" | Tee-Object -FilePath ./r36-met-table-summary.txt -Append
           }
           try {
-            Dump-Range 'money_helpers' 0x006FF680 0x720
-            Dump-Range 'money_tables' 0x00A0EC40 0x90
-            Dump-Range 'money_state_globals' 0x00A2AC60 0x90
-            Dump-Range 'money_core_constants' 0x00700200 0x140
+            Dump-Binary 'met_table_a6bc00' 0x00A6BC00 0x11000
+            Dump-Binary 'met_aux_a6c0e0' 0x00A6C0C0 0x80
+            Dump-Binary 'met_helper_constants' 0x006FFC20 0x170
           } finally { [Mem]::CloseHandle($h)|Out-Null }
-          Write-Host 'R36_MONEY_ENDPOINT_HELPER_CLOSURE=PASS'
+          Write-Host 'R36_MET_TABLE_CLOSURE=PASS'
 
-      - name: Upload helper closure
+      - name: Upload MET closure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-money-endpoint-helper-closure
+          name: r36-met-table-closure
           path: |
-            r36-money-helper-closure.txt
+            met_table_a6bc00.bin
+            met_aux_a6c0e0.bin
+            met_helper_constants.bin
+            r36-met-table-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
