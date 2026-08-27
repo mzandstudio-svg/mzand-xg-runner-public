@@ -1,4 +1,4 @@
-name: R36.20 XG Cube Dispatcher Helper Ranges
+name: R36.21 XG Cube Dispatcher Classifier Params Table
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Dump dispatcher helper ranges
+      - name: Dump classifier params and coefficient table
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -47,11 +47,11 @@ jobs:
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h -eq [IntPtr]::Zero){throw 'OpenProcess failed'}
           $ranges=@(
-            @{Name='cube_eval_9d7000'; Start=0x009D7000L; Len=0x5000},
-            @{Name='helper_463000'; Start=0x00463000L; Len=0x2000},
-            @{Name='cube_slot_6ff000'; Start=0x006FF000L; Len=0x3000}
+            @{Name='classifier_6f9000'; Start=0x006F9000L; Len=0x2000},
+            @{Name='eval_backend_9d5000'; Start=0x009D5000L; Len=0x3000},
+            @{Name='cube_params_a12620'; Start=0x00A12620L; Len=0x100},
+            @{Name='cube_coeff_table_a2ac6c'; Start=0x00A2AC6CL; Len=0x22000}
           )
-          $summary=@()
           try {
             foreach($r in $ranges){
               $buf=New-Object byte[] $r.Len; $got=[IntPtr]::Zero
@@ -60,29 +60,28 @@ jobs:
               $n=[int]$got.ToInt64(); if($n -ne $r.Len){$buf=$buf[0..($n-1)]}
               $file="$($r.Name)_from_$(([long]$r.Start).ToString('x')).bin"
               [IO.File]::WriteAllBytes((Join-Path $PWD $file),$buf)
-              $line="DUMP name=$file va=0x$(([long]$r.Start).ToString('x')) len=$n"
-              $line | Tee-Object -FilePath ./r36-helper-ranges.txt -Append
-              $summary += $line
+              "DUMP name=$file va=0x$(([long]$r.Start).ToString('x')) len=$n" | Tee-Object -FilePath ./r36-dispatcher-data.txt -Append
             }
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-          'TARGET 0x9d7c10' | Add-Content ./r36-helper-ranges.txt
-          'TARGET 0x9da770' | Add-Content ./r36-helper-ranges.txt
-          'TARGET 0x9daa40' | Add-Content ./r36-helper-ranges.txt
-          'TARGET 0x9daba0' | Add-Content ./r36-helper-ranges.txt
-          'TARGET 0x9dac90' | Add-Content ./r36-helper-ranges.txt
-          'TARGET 0x463a00' | Add-Content ./r36-helper-ranges.txt
-          'TARGET 0x6fffec' | Add-Content ./r36-helper-ranges.txt
-          'TARGET 0x70074c' | Add-Content ./r36-helper-ranges.txt
-          'R36_HELPER_RANGES=PASS' | Tee-Object -FilePath ./r36-helper-summary.txt
-      - name: Upload dispatcher helpers
+          'TARGET 0x6f9580' | Add-Content ./r36-dispatcher-data.txt
+          'TARGET 0x9d5c20' | Add-Content ./r36-dispatcher-data.txt
+          'TARGET 0x9d5c80' | Add-Content ./r36-dispatcher-data.txt
+          'TARGET 0xa12628' | Add-Content ./r36-dispatcher-data.txt
+          'TARGET 0xa1262c' | Add-Content ./r36-dispatcher-data.txt
+          'TARGET 0xa12630' | Add-Content ./r36-dispatcher-data.txt
+          'TARGET 0xa12634' | Add-Content ./r36-dispatcher-data.txt
+          'TARGET 0xa12638' | Add-Content ./r36-dispatcher-data.txt
+          'TARGET 0xa2ac6c' | Add-Content ./r36-dispatcher-data.txt
+          'R36_DISPATCHER_DATA=PASS' | Tee-Object -FilePath ./r36-dispatcher-summary.txt
+      - name: Upload dispatcher data
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-cube-dispatcher-helper-ranges
+          name: r36-cube-dispatcher-classifier-params-table
           path: |
             *_from_*.bin
-            r36-helper-ranges.txt
-            r36-helper-summary.txt
+            r36-dispatcher-data.txt
+            r36-dispatcher-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: error
           retention-days: 14
