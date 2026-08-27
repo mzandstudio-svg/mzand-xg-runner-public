@@ -1,4 +1,4 @@
-name: R36.4 XG Cube Helper Memory Slices
+name: R36.5 XG Classifier Metric Globals
 
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
 
-      - name: Dump cube helper bytes
+      - name: Dump classifier metric globals
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -58,23 +58,22 @@ jobs:
             if(-not $ok -or $got.ToInt64() -ne $len){ throw "ReadProcessMemory $name failed got=$($got.ToInt64())" }
             $hex=($buf | ForEach-Object { $_.ToString('x2') }) -join ''
             $line="R36_RANGE name=$name va=0x$($va.ToString('x')) len=$len hex=$hex"
-            Add-Content -Path ./r36-cube-helpers.txt -Value $line
+            Add-Content -Path ./r36-classifier-globals.txt -Value $line
             Write-Host $line
           }
           try {
-            Dump-Range 'race_metric_side' 0x009D7B80 0x180
-            Dump-Range 'race_metric_combine' 0x00463980 0x140
-            Dump-Range 'classifier_metric' 0x007006C0 0x180
+            Dump-Range 'classifier_params' 0x00A0EC70 0x10
+            Dump-Range 'classifier_table' 0x00B04068 0x1100
           } finally { [Mem]::CloseHandle($h) | Out-Null }
-          Write-Host 'R36_CUBE_HELPER_SLICES=PASS'
+          Write-Host 'R36_CLASSIFIER_GLOBALS=PASS'
 
       - name: Upload slice
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-cube-helper-slices
+          name: r36-classifier-globals
           path: |
-            r36-cube-helpers.txt
+            r36-classifier-globals.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
