@@ -1,4 +1,4 @@
-name: R36.29 XG Classifier Override Global
+name: R36.30 XG Class3 Efficiency Helpers
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Read classifier override global
+      - name: Dump class3 helper bodies
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -45,21 +45,26 @@ jobs:
           $proc=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
+          function Dump([long]$va,[int]$len,[string]$name){
+            $b=New-Object byte[] $len; $r=[IntPtr]::Zero
+            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$b,$len,[ref]$r)){throw "read failed 0x$($va.ToString('x'))"}
+            if($r.ToInt64()-ne$len){throw "short read 0x$($va.ToString('x'))"}
+            [IO.File]::WriteAllBytes((Join-Path $PWD $name),$b)
+          }
           try {
-            $b=New-Object byte[] 4; $r=[IntPtr]::Zero
-            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new(0x00A0D700L),$b,4,[ref]$r)){throw 'read failed'}
-            $v=[BitConverter]::ToInt32($b,0)
-            "A0D700=$v" | Tee-Object -FilePath ./r36-classifier-global.txt
-            'R36_CLASSIFIER_OVERRIDE_GLOBAL=PASS' | Tee-Object -FilePath ./r36-classifier-global-summary.txt
+            Dump 0x009D7800 0x1000 'class3_helper_9d7800.bin'
+            Dump 0x00463800 0x0800 'class3_helper_463800.bin'
+            'R36_CLASS3_HELPERS=PASS' | Tee-Object -FilePath ./r36-class3-helper-summary.txt
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-      - name: Upload classifier global
+      - name: Upload class3 helpers
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-xg-classifier-override-global
+          name: r36-xg-class3-efficiency-helpers
           path: |
-            r36-classifier-global.txt
-            r36-classifier-global-summary.txt
+            class3_helper_9d7800.bin
+            class3_helper_463800.bin
+            r36-class3-helper-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
