@@ -73,6 +73,7 @@ def module_base(pid):
 def trigger_analyze_position():
     time.sleep(3.0)
     import pyautogui
+    from pywinauto import Desktop
     user32=ctypes.windll.user32
     hwnd=0
     target_pid=PID
@@ -89,60 +90,103 @@ def trigger_analyze_position():
     user32.ShowWindow(hwnd,5)
     user32.SetForegroundWindow(hwnd)
     time.sleep(.7)
-    print(f'R37_TRIGGER_CTRL1 HWND=0x{int(hwnd):x}',flush=True)
-    pyautogui.hotkey('ctrl','1')
+    print(f'R37_TRIGGER_ALT_A HWND=0x{int(hwnd):x}',flush=True)
+    pyautogui.hotkey('alt','a')
+    time.sleep(1.0)
+    desktop=Desktop(backend='uia')
+    items=[]
+    try:
+        for w in desktop.windows():
+            try:
+                for e in w.descendants(control_type='MenuItem'):
+                    try:
+                        name=(e.window_text() or '').strip()
+                        if name:
+                            items.append((name,e))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    except Exception as e:
+        print(f'R37_UIA_ENUM_FAIL {e}',flush=True)
+    names=[]
+    for name,_ in items:
+        if name not in names: names.append(name)
+    print('R37_ANALYZE_MENU_ITEMS='+' | '.join(names),flush=True)
+    target=None
+    for name,e in items:
+        n=' '.join(name.lower().split())
+        if n in ('analyze position','analyse position'):
+            target=e; break
+    if target is None:
+        for name,e in items:
+            n=' '.join(name.lower().split())
+            if 'analy' in n and 'position' in n:
+                target=e; break
+    if target is None:
+        print('R37_TRIGGER_FAIL Analyze Position menu item not found',flush=True); return
+    try:
+        print(f'R37_TRIGGER_CLICK name={target.window_text()!r}',flush=True)
+        target.click_input()
+    except Exception as e:
+        print(f'R37_TRIGGER_FAIL click {e}',flush=True)
 
-PID=int(sys.argv[1]); OUT=Path(sys.argv[2]); OUT.parent.mkdir(parents=True,exist_ok=True)
-base=module_base(PID); bp=base+BP_RVA
-h=k32.OpenProcess(PROCESS_ALL_ACCESS,False,PID)
-if not h: raise OSError(ctypes.get_last_error(),'OpenProcess')
-orig=rpm(h,bp,1)
-print(f'R37_ATTACH PID={PID} BASE=0x{base:x} BP=0x{bp:x} ORIG={orig.hex()}',flush=True)
-if not k32.DebugActiveProcess(PID): raise OSError(ctypes.get_last_error(),'DebugActiveProcess')
-try:
-    wpm(h,bp,b'\xCC')
-    threading.Thread(target=trigger_analyze_position,daemon=True).start()
-    deadline=time.time()+90; captured=False
-    with OUT.open('w',encoding='utf-8') as f:
-        while time.time()<deadline and not captured:
-            raw=ctypes.create_string_buffer(192)
-            if not k32.WaitForDebugEvent(raw,1000): continue
-            code,pid,tid=struct.unpack_from('<III',raw.raw,0)
-            status=DBG_CONTINUE
-            if code==EXCEPTION_DEBUG_EVENT:
-                exc=struct.unpack_from('<I',raw.raw,12)[0]
-                th=k32.OpenThread(THREAD_ALL_ACCESS,False,tid)
-                if th:
-                    ctx=WOW64_CONTEXT(); ctx.ContextFlags=CONTEXT_FULL
-                    if k32.Wow64GetThreadContext(th,ctypes.byref(ctx)):
-                        if exc==0x80000003 and ctx.Eip==bp+1:
-                            ebp=ctx.Ebp; ebx=ctx.Ebx
-                            wpm(h,bp,orig); ctx.Eip=bp
-                            k32.Wow64SetThreadContext(th,ctypes.byref(ctx))
-                            def dump_arr(addr,count): return [f32(h,addr+4*i) for i in range(count)]
-                            f.write(f'PID={PID}\nBASE=0x{base:08x}\nTHREAD={tid}\nEBP=0x{ebp:08x}\nEBX=0x{ebx:08x}\n')
-                            f.write(f'LIVE_ENDPOINT_F8={f32(h,ebp-0x8):.9g}\n')
-                            f.write(f'DEAD_ENDPOINT_F4={f32(h,ebp-0xc):.9g}\n')
-                            f.write('KNOT_X_EBP_M90='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x90,4))+'\n')
-                            f.write('KNOT_Y_EBP_M80='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x80,4))+'\n')
-                            f.write('LOCAL_C0='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x40,8))+'\n')
-                            f.write('CTX_EBP_MB4_DWORDS='+','.join(f'0x{u32(h,ebp-0xb4+4*i):08x}' for i in range(24))+'\n')
-                            f.write('CTX_EBP_MB4_FLOATS='+','.join(f'{f32(h,ebp-0xb4+4*i):.9g}' for i in range(24))+'\n')
-                            f.write(f'EBX_CUBE_OWNER_FIELD_2C={i32(h,ebx+0x2c)}\n')
-                            f.write(f'EBX_INPUT_48={f32(h,ebx+0x48):.9g}\n')
-                            f.write(f'EBX_CURRENT_EQUITY_54={f32(h,ebx+0x54):.9g}\n')
-                            f.flush(); captured=True
-                            print('R37_BREAKPOINT_CAPTURED=PASS',flush=True)
-                    k32.CloseHandle(th)
-            elif code==EXIT_PROCESS_DEBUG_EVENT:
-                break
-            k32.ContinueDebugEvent(pid,tid,status)
-        if not captured:
-            f.write('R37_BREAKPOINT_CAPTURED=NO\n')
-            raise RuntimeError('cubeful breakpoint not reached')
-finally:
-    try: wpm(h,bp,orig)
-    except Exception: pass
-    k32.DebugActiveProcessStop(PID)
-    k32.CloseHandle(h)
-print(f'R37_TRACE=PASS OUT={OUT}',flush=True)
+def main():
+    global PID,OUT
+    PID=int(sys.argv[1]); OUT=Path(sys.argv[2]); OUT.parent.mkdir(parents=True,exist_ok=True)
+    base=module_base(PID); bp=base+BP_RVA
+    h=k32.OpenProcess(PROCESS_ALL_ACCESS,False,PID)
+    if not h: raise OSError(ctypes.get_last_error(),'OpenProcess')
+    orig=rpm(h,bp,1)
+    print(f'R37_ATTACH PID={PID} BASE=0x{base:x} BP=0x{bp:x} ORIG={orig.hex()}',flush=True)
+    if not k32.DebugActiveProcess(PID): raise OSError(ctypes.get_last_error(),'DebugActiveProcess')
+    try:
+        wpm(h,bp,b'\xCC')
+        threading.Thread(target=trigger_analyze_position,daemon=True).start()
+        deadline=time.time()+90; captured=False
+        with OUT.open('w',encoding='utf-8') as f:
+            while time.time()<deadline and not captured:
+                raw=ctypes.create_string_buffer(192)
+                if not k32.WaitForDebugEvent(raw,1000): continue
+                code,pid,tid=struct.unpack_from('<III',raw.raw,0)
+                status=DBG_CONTINUE
+                if code==EXCEPTION_DEBUG_EVENT:
+                    exc=struct.unpack_from('<I',raw.raw,12)[0]
+                    th=k32.OpenThread(THREAD_ALL_ACCESS,False,tid)
+                    if th:
+                        ctx=WOW64_CONTEXT(); ctx.ContextFlags=CONTEXT_FULL
+                        if k32.Wow64GetThreadContext(th,ctypes.byref(ctx)):
+                            if exc==0x80000003 and ctx.Eip==bp+1:
+                                ebp=ctx.Ebp; ebx=ctx.Ebx
+                                wpm(h,bp,orig); ctx.Eip=bp
+                                k32.Wow64SetThreadContext(th,ctypes.byref(ctx))
+                                def dump_arr(addr,count): return [f32(h,addr+4*i) for i in range(count)]
+                                f.write(f'PID={PID}\nBASE=0x{base:08x}\nTHREAD={tid}\nEBP=0x{ebp:08x}\nEBX=0x{ebx:08x}\n')
+                                f.write(f'LIVE_ENDPOINT_F8={f32(h,ebp-0x8):.9g}\n')
+                                f.write(f'DEAD_ENDPOINT_F4={f32(h,ebp-0xc):.9g}\n')
+                                f.write('KNOT_X_EBP_M90='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x90,4))+'\n')
+                                f.write('KNOT_Y_EBP_M80='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x80,4))+'\n')
+                                f.write('LOCAL_C0='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x40,8))+'\n')
+                                f.write('CTX_EBP_MB4_DWORDS='+','.join(f'0x{u32(h,ebp-0xb4+4*i):08x}' for i in range(24))+'\n')
+                                f.write('CTX_EBP_MB4_FLOATS='+','.join(f'{f32(h,ebp-0xb4+4*i):.9g}' for i in range(24))+'\n')
+                                f.write(f'EBX_CUBE_OWNER_FIELD_2C={i32(h,ebx+0x2c)}\n')
+                                f.write(f'EBX_INPUT_48={f32(h,ebx+0x48):.9g}\n')
+                                f.write(f'EBX_CURRENT_EQUITY_54={f32(h,ebx+0x54):.9g}\n')
+                                f.flush(); captured=True
+                                print('R37_BREAKPOINT_CAPTURED=PASS',flush=True)
+                        k32.CloseHandle(th)
+                elif code==EXIT_PROCESS_DEBUG_EVENT:
+                    break
+                k32.ContinueDebugEvent(pid,tid,status)
+            if not captured:
+                f.write('R37_BREAKPOINT_CAPTURED=NO\n')
+                raise RuntimeError('cubeful breakpoint not reached')
+    finally:
+        try: wpm(h,bp,orig)
+        except Exception: pass
+        k32.DebugActiveProcessStop(PID)
+        k32.CloseHandle(h)
+    print(f'R37_TRACE=PASS OUT={OUT}',flush=True)
+
+if __name__=='__main__':
+    main()
