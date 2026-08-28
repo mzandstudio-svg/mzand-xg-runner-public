@@ -18,15 +18,7 @@ class SideFeatures:
 
 
 def xg_state_to_arrays(board: Sequence[int]) -> tuple[list[int], list[int]]:
-    """Portable copy of the canonicalization at XG 0x6F9580.
-
-    The XG state has 26 signed bytes. The classifier uses two 25-int arrays.
-    Positive state bytes 1..25 map to side0 indices 0..24. Negative state
-    bytes 0..24 map, sign-negated, to side1 indices 24..0.
-
-    Writes outside those canonical ranges made by the original loop are zeros
-    for valid XG states and are intentionally not represented here.
-    """
+    """Portable copy of the canonicalization at XG 0x6F9580."""
     if len(board) != 26:
         raise ValueError('expected 26 signed XG state bytes')
     a0 = [0] * 25
@@ -72,19 +64,15 @@ def side_features(a: Sequence[int]) -> SideFeatures:
     return f
 
 
-def _xg_combination(n: int, r: int) -> int:
-    """XG table B04068 / GNU Combination convention: C(n-1,r-1)."""
-    if r <= 0 or n <= 0 or r > n:
-        return 0
-    return comb(n - 1, r - 1)
-
-
 def _position_f(bits: int, n: int, r: int) -> int:
-    # Exact structure of XG 0x700708.
+    """Exact iterative equivalent of XG 0x700708.
+
+    B04068[n][r] stores C(n-1,r), so a set bit at n-1 contributes C(n-1,r).
+    """
     out = 0
     while n != r:
         if bits & (1 << (n - 1)):
-            out += _xg_combination(n - 1, r)
+            out += comb(n - 1, r)
             n -= 1
             r -= 1
         else:
@@ -107,7 +95,6 @@ def position_bearoff6(a: Sequence[int]) -> int:
 
 
 def _crashed_side(a: Sequence[int], total: int) -> bool:
-    """One iteration of the symmetric 0x6FBD38 crash test."""
     if total <= 6:
         return True
     p0 = int(a[0])
@@ -144,12 +131,9 @@ def classify_base_arrays(a0: Sequence[int], a1: Sequence[int]) -> int:
             return 7 if made0 >= 2 or made1 >= 2 else 4
         return 4
 
-    # No contact by back-checker geometry. If either side is not contained in
-    # its six-point home board, XG selects class 3.
     if f0.back > 5 or f1.back > 5:
         return 3
 
-    # Special asymmetric checker-count race condition from 0x6FBEB6.
     if (f0.total == 15 or f1.total == 15) and (f0.total < 7 or f1.total < 7):
         return 3
 
@@ -163,12 +147,7 @@ def classify_base_arrays(a0: Sequence[int], a1: Sequence[int]) -> int:
 
 
 def classify_raw(board: Sequence[int], override_global: int = 0) -> int:
-    """Portable standard-path equivalent of XG 0x6F9580 -> 0x6FBF1C.
-
-    With the proven normal startup value A0D700=0, 0x6FBF1C returns the base
-    class from 0x6FBD38 unchanged. `override_global=1` is deliberately rejected
-    until its optional classes 8/9 policy is separately needed by BG1.
-    """
+    """Portable standard-path equivalent of XG 0x6F9580 -> 0x6FBF1C."""
     if override_global != 0:
         raise NotImplementedError('optional A0D700=1 override policy is not production-authorized')
     a0, a1 = xg_state_to_arrays(board)
@@ -185,9 +164,8 @@ ORACLE = [
 
 
 def selftest() -> None:
-    # Exact combinatorial boundary identities observed in XG.
-    assert _xg_combination(12, 6) - 1 == 923
-    assert _xg_combination(21, 6) - 1 == 54263
+    assert comb(12, 6) - 1 == 923
+    assert comb(21, 6) - 1 == 54263
 
     for name, board, expected in ORACLE:
         got = classify_raw(board)
