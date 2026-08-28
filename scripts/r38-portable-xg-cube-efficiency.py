@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Iterable, Sequence
+import struct
+from typing import Sequence
 
-XG_EFF_DEFAULT = float.fromhex('0x1.68f5c2p-1')  # exact float32 0.705 promoted to Python float
-XG_EFF_CLASS7 = float.fromhex('0x1.b33334p-1')   # exact float32 0.85 promoted to Python float
-XG_CLASS3_BASE = float.fromhex('0x1.000000p-1')  # 0.5f
-XG_CLASS3_TOP = float.fromhex('0x1.800000p-1')   # 0.75f
-XG_CLASS3_TARGET = float.fromhex('0x1.70a3d8p-1')# 0.72f
-XG_RACE_MAX = 0.88235294118
+XG_EFF_DEFAULT = float.fromhex('0x1.68f5c2p-1')   # exact float32 0.705 promoted to double
+XG_EFF_CLASS7 = float.fromhex('0x1.b33334p-1')    # exact float32 0.85 promoted to double
+XG_CLASS3_BASE = float.fromhex('0x1.000000p-1')   # 0.5f
+XG_CLASS3_TOP = float.fromhex('0x1.800000p-1')    # 0.75f
+XG_CLASS3_TARGET = float.fromhex('0x1.70a3d8p-1') # exact float32 0.72
+XG_RACE_MAX = float.fromhex('0x1.c3c3c3c3cb86ap-1') # exact inline XG double
+
+
+def f32(x: float) -> float:
+    return struct.unpack('<f', struct.pack('<f', float(x)))[0]
 
 
 def _require_board(board: Sequence[int]) -> None:
@@ -21,24 +25,24 @@ def _require_board(board: Sequence[int]) -> None:
 
 
 def mirror_board(board: Sequence[int]) -> list[int]:
-    """Portable equivalent of XG 0x9D7AE0: reverse 26 points and negate signs."""
     _require_board(board)
     return [-int(board[25 - i]) for i in range(26)]
 
 
 def pip_metric(board: Sequence[int]) -> int:
-    """Portable equivalent of XG 0x9D7C10 on an already-oriented board."""
     _require_board(board)
     return sum(i * int(v) for i, v in enumerate(board) if v > 0)
 
 
 def class3_efficiency(board: Sequence[int]) -> float:
-    """Portable equivalent of XG 0x9DAC90."""
+    """Portable equivalent of XG 0x9DAC90 including its final FSTPS round."""
     p1 = pip_metric(board)
     p2 = pip_metric(mirror_board(board))
     m = max(p1, p2)
     eff = XG_CLASS3_BASE + (XG_CLASS3_TARGET - XG_CLASS3_BASE) * (m - 30) / 90.0
-    return max(XG_CLASS3_BASE, min(XG_CLASS3_TOP, eff))
+    eff = max(XG_CLASS3_BASE, min(XG_CLASS3_TOP, eff))
+    # 0x9DACE5 stores to single precision before the final FLDS return.
+    return f32(eff)
 
 
 def _positive_front(board: Sequence[int]) -> int:
@@ -116,8 +120,16 @@ def cube_efficiency(
 
 
 def blend_live_dead(live_endpoint: float, dead_endpoint: float, efficiency: float) -> float:
-    """Recovered caller formula at both 0x9DC8E9 and 0x9DCE97."""
+    """Semantic blend recovered at both 0x9DC8E9 and 0x9DCE97."""
     return efficiency * live_endpoint + (1.0 - efficiency) * dead_endpoint
+
+
+def blend_live_dead_xg_f32(live_endpoint: float, dead_endpoint: float, efficiency: float) -> float:
+    """Caller-compatible blend: f32 inputs and final FSTPS result."""
+    live = f32(live_endpoint)
+    dead = f32(dead_endpoint)
+    eff = f32(efficiency)
+    return f32(eff * live + (1.0 - eff) * dead)
 
 
 ORACLE_CASES = [
@@ -139,9 +151,12 @@ def selftest() -> None:
             if err > tol:
                 raise AssertionError(f'{name} mismatch: {got} vs {expected}')
 
+    c3 = [0,0,0,0,0,0,0,15,0,0,0,0,0,0,0,0,0,0,-15,0,0,0,0,0,0,0]
+    assert class3_efficiency(c3) == 0.6833333373069763
     assert abs(cube_efficiency(ORACLE_CASES[0][1], 7) - XG_EFF_CLASS7) < 1e-15
     assert cube_efficiency(ORACLE_CASES[0][1], 4, global_force_one=True) == 1.0
     assert abs(blend_live_dead(0.8, 0.2, 0.75) - 0.65) < 1e-15
+    assert blend_live_dead_xg_f32(0.8, 0.2, 0.75) == f32(0.65)
     print('R38_PORTABLE_XG_CUBE_EFFICIENCY_SELFTEST=PASS')
 
 
