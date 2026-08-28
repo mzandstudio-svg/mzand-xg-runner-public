@@ -7,6 +7,7 @@ on:
       - .github/workflows/r35-xg-1ply-cube-oracle.yml
       - scripts/r35-xg-1ply-oracle.py
       - scripts/r35-proven-startup.ps1
+      - scripts/r50f-xg-analysis-level-forensic.py
       - corpus/r35-xg-oracle-corpus.tsv
   workflow_dispatch:
 
@@ -66,6 +67,16 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
+
+      - name: R50F forensic capture of Analyze Level controls
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          python ./scripts/r50f-xg-analysis-level-forensic.py *> ./r50f-analysis-level-console.txt
+          $rc=$LASTEXITCODE
+          Get-Content ./r50f-analysis-level-console.txt
+          if(Test-Path ./r50f-analysis-level-forensic.txt){Get-Content ./r50f-analysis-level-forensic.txt}
+          if($rc-ne0){throw "R50F forensic capture failed rc=$rc"}
 
       - name: Smoke exact 1-ply oracle on first three contexts
         shell: powershell
@@ -134,6 +145,8 @@ jobs:
             r35-proven-startup-report.txt
             r35-proven-startup-summary.txt
             r35-xg-install.log
+            r50f-analysis-level-console.txt
+            r50f-analysis-level-forensic.txt
             r35-smoke-xgp/*.xgp
             r35-xgp/*.xgp
           if-no-files-found: ignore
