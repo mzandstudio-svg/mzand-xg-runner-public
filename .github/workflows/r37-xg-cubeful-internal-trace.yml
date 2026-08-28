@@ -59,3 +59,5 @@ jobs:
             r35-proven-startup-summary.txt
           if-no-files-found: warn
           retention-days: 14
+
+# R37 exact trace trigger: 2026-08-28
