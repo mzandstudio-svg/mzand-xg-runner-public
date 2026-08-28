@@ -34,7 +34,7 @@ jobs:
 
       - name: Prepare trace dependency
         shell: powershell
-        run: python -m pip install pyautogui
+        run: python -m pip install pyautogui pywinauto
 
       - name: Reach proven ready XG2 position
         shell: powershell
@@ -60,4 +60,4 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-# R37 exact trace trigger: 2026-08-28
+# R37 exact trace trigger: proven Alt+A + UIA Analyze Position
