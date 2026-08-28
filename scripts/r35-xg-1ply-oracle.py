@@ -77,6 +77,114 @@ def extract_raw_cube(path: Path) -> dict:
     return exact[-1] if exact else analyzed[-1]
 
 
+def configure_exact_1ply(auto: XGAutomator) -> None:
+    """
+    Open XG's analysis-level dialog through the authoritative
+    SET_ANALYZE_LEVEL WM_COMMAND path, select the built-in "1-ply"
+    entry by live ComboBox text, verify the selected entry, and commit.
+    """
+    import ctypes
+
+    WM_GETTEXT = 0x000D
+    CB_GETCURSEL = 0x0147
+    CB_GETLBTEXTLEN = 0x0149
+    CB_GETLBTEXT = 0x0148
+
+    auto.analysis_level = "1-ply"
+
+    print(
+        f"R50E_SET_ANALYZE_LEVEL_CMD={auto.cmd.SET_ANALYZE_LEVEL} "
+        f"profile={auto.cmd.version}"
+    )
+
+    auto.send_command(auto.cmd.SET_ANALYZE_LEVEL)
+
+    pid = ctypes.wintypes.DWORD()
+    user32.GetWindowThreadProcessId(auto._hwnd, ctypes.byref(pid))
+    xg_pid = pid.value
+
+    dlg = 0
+    deadline = time.time() + 10.0
+
+    while time.time() < deadline:
+        try:
+            candidate = auto._find_xg_dialog(
+                xg_pid, auto._hwnd, skip=set(auto._skip_hwnds)
+            )
+        except Exception:
+            candidate = 0
+
+        if candidate:
+            try:
+                combos = auto._enum_combo_boxes(candidate)
+            except Exception:
+                combos = []
+
+            if combos:
+                dlg = candidate
+                break
+
+        time.sleep(0.25)
+
+    if not dlg:
+        raise RuntimeError(
+            "R50E analysis-level dialog with TComboBox not found"
+        )
+
+    auto._set_analysis_level(dlg, "1-ply")
+
+    combos = auto._enum_combo_boxes(dlg)
+    if not combos:
+        raise RuntimeError("R50E no analysis-level ComboBox after selection")
+
+    verified = 0
+
+    for i, combo in enumerate(combos):
+        idx = user32.SendMessageW(combo, CB_GETCURSEL, 0, 0)
+        if idx < 0:
+            raise RuntimeError(
+                f"R50E combo {i} has no selected analysis level"
+            )
+
+        n = user32.SendMessageW(combo, CB_GETLBTEXTLEN, idx, 0)
+        if n < 0:
+            raise RuntimeError(
+                f"R50E failed reading selected level from combo {i}"
+            )
+
+        buf = ctypes.create_unicode_buffer(n + 1)
+        user32.SendMessageW(
+            combo, CB_GETLBTEXT, idx, ctypes.addressof(buf)
+        )
+
+        raw = buf.value
+        display = raw.split(":", 1)[0].strip()
+
+        print(
+            f"R50E_LEVEL_VERIFY combo={i} "
+            f"index={idx} display={display!r}"
+        )
+
+        if display.lower() != "1-ply":
+            raise RuntimeError(
+                f"R50E expected 1-ply, got {display!r}"
+            )
+
+        verified += 1
+
+    # Commit dialog using the already-proven helper behavior.
+    class _HwndWrap:
+        def __init__(self, h):
+            self.handle = h
+
+    auto._click_button(_HwndWrap(dlg), ["OK", "Ok"])
+    time.sleep(0.8)
+
+    print(
+        f"R50E_EXACT_1PLY_CONFIGURED=YES combos={verified}"
+    )
+
+
 def analyze_cube_exact(auto: XGAutomator) -> None:
     """
     Trigger XG cube analysis through the authoritative WM_COMMAND path.
@@ -164,6 +272,21 @@ def export_xgp(auto: XGAutomator, out: Path) -> None:
 
     if out.exists():
         out.unlink()
+
+    # XG headless ignores the requested basename and commonly writes
+    # Position.xgp / Position 2.xgp in the target directory.  Leaving
+    # those behind causes Confirm Save As on the next oracle row.
+    removed = 0
+    for q in out.parent.glob("Position*.xgp"):
+        try:
+            rq = q.resolve()
+            if rq != out:
+                q.unlink()
+                removed += 1
+        except OSError:
+            pass
+
+    print(f"R50E_FALLBACK_CLEANUP removed={removed}")
 
     started = time.time()
 
@@ -269,6 +392,7 @@ def main() -> int:
                 rec = {"id": rid, "group": row["group"], "context": row["context"], "xgid": row["xgid"], "status": "FAIL", "error": ""}
                 try:
                     print(f"R35_BEGIN index={i} id={rid}")
+                    configure_exact_1ply(auto)
                     auto.import_xgid_from_file(row["xgid"])
                     analyze_cube_exact(auto)
                     xgp = (args.xgp_dir / f"{rid}.xgp").resolve()
