@@ -88,7 +88,7 @@ jobs:
           $proc=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
           $h=[R40]::OpenProcess(0x1F0FFF,$false,$proc.Id); if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
           try {
-            'name`texpected`txg`tboard' | Out-File ./r40-xg-classes.tsv -Encoding ascii
+            "name`texpected`txg`tboard" | Out-File ./r40-xg-classes.tsv -Encoding ascii
             foreach($c in $cases){
               $got=XGClass $h $c[1]
               "$($c[0])`t$($c[2])`t$got`t$([string]::Join(',', $c[1]))" | Tee-Object -FilePath ./r40-xg-classes.tsv -Append
@@ -98,9 +98,12 @@ jobs:
         shell: powershell
         run: |
           @'
-          import csv, importlib.util, pathlib
+          import csv, importlib.util, pathlib, sys
           p=pathlib.Path('scripts/r39-portable-xg-raw-classifier.py')
-          spec=importlib.util.spec_from_file_location('r39c',p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+          spec=importlib.util.spec_from_file_location('r39c',p)
+          m=importlib.util.module_from_spec(spec)
+          sys.modules[spec.name]=m
+          spec.loader.exec_module(m)
           ok=0
           with open('r40-xg-classes.tsv',encoding='ascii') as f:
               rows=list(csv.DictReader(f,delimiter='\t'))
