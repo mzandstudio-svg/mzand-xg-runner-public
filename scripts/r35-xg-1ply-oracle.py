@@ -85,15 +85,116 @@ def ctrl_1(hwnd: int) -> None:
     time.sleep(0.5)
 
 
+def _recent_xgp_candidates(start_time: float, wanted: Path) -> list[Path]:
+    roots = []
+
+    for root in (
+        Path.cwd(),
+        Path.home(),
+        Path(os.environ.get("USERPROFILE", "")),
+        Path(os.environ.get("TEMP", "")),
+        Path(os.environ.get("LOCALAPPDATA", "")),
+        Path(os.environ.get("APPDATA", "")),
+    ):
+        try:
+            root = root.resolve()
+        except Exception:
+            continue
+        if not str(root) or not root.exists():
+            continue
+        if root not in roots:
+            roots.append(root)
+
+    found = {}
+    for root in roots:
+        try:
+            for q in root.rglob("*.xgp"):
+                try:
+                    st = q.stat()
+                except OSError:
+                    continue
+                if st.st_size <= 0:
+                    continue
+                if st.st_mtime < start_time - 2.0:
+                    continue
+                try:
+                    rq = q.resolve()
+                except Exception:
+                    rq = q
+                if rq == wanted:
+                    continue
+                found[str(rq).lower()] = (st.st_mtime, rq)
+        except (OSError, PermissionError):
+            pass
+
+    return [
+        q for _, q in
+        sorted(found.values(), key=lambda x: x[0], reverse=True)
+    ]
+
+
 def export_xgp(auto: XGAutomator, out: Path) -> None:
+    import shutil
+
+    out = out.resolve()
     out.parent.mkdir(parents=True, exist_ok=True)
+
     if out.exists():
         out.unlink()
+
+    started = time.time()
+
     auto._headless_file_operation(out, auto.cmd.EXPORT_POS_XGP, "save")
-    time.sleep(0.8)
+    time.sleep(1.0)
     auto._wait_for_dialogs_cleared(max_wait=5.0)
+
+    if out.exists() and out.stat().st_size > 0:
+        print(
+            f"R50C_XGP_DIRECT=YES path={out} "
+            f"size={out.stat().st_size}"
+        )
+        return
+
+    candidates = _recent_xgp_candidates(started, out)
+
+    print(f"R50C_XGP_DIRECT=NO wanted={out}")
+    print(f"R50C_XGP_CANDIDATES={len(candidates)}")
+
+    for i, q in enumerate(candidates[:20]):
+        try:
+            st = q.stat()
+            print(
+                f"R50C_XGP_CANDIDATE index={i} "
+                f"path={q} size={st.st_size} mtime={st.st_mtime}"
+            )
+        except OSError:
+            pass
+
+    if not candidates:
+        raise RuntimeError(
+            f"XGP export failed and no recent fallback XGP found: {out}"
+        )
+
+    src = candidates[0]
+
+    # Require freshness attributable to this export operation.
+    st = src.stat()
+    if st.st_mtime < started - 2.0:
+        raise RuntimeError(
+            f"Fallback XGP is stale: {src}"
+        )
+
+    shutil.copy2(src, out)
+
     if not out.exists() or out.stat().st_size == 0:
-        raise RuntimeError(f"XGP export failed: {out}")
+        raise RuntimeError(
+            f"Fallback XGP recovery failed: src={src} dst={out}"
+        )
+
+    print(
+        f"R50C_XGP_RECOVERED=YES src={src} dst={out} "
+        f"size={out.stat().st_size}"
+    )
 
 
 def main() -> int:
