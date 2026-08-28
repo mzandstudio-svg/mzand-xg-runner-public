@@ -1,4 +1,4 @@
-name: R36.26 XG Classifier and Cube Efficiency Internal Oracle
+name: R36.27 XG Efficiency Constants and Classifier Body
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  oracle:
+  dump:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -29,75 +29,63 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Call internal classifier and efficiency dispatcher
+      - name: Dump exact efficiency constants and classifier body
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
           Add-Type @'
           using System;
           using System.Runtime.InteropServices;
-          public static class R {
+          public static class Mem {
             [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint a,bool i,int pid);
-            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr VirtualAllocEx(IntPtr h,IntPtr a,uint s,uint t,uint p);
-            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool VirtualFreeEx(IntPtr h,IntPtr a,uint s,uint t);
-            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool WriteProcessMemory(IntPtr h,IntPtr a,byte[] b,int s,out IntPtr w);
             [DllImport("kernel32.dll", SetLastError=true)] public static extern bool ReadProcessMemory(IntPtr h,IntPtr a,byte[] b,int s,out IntPtr r);
-            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr CreateRemoteThread(IntPtr h,IntPtr sa,uint ss,IntPtr start,IntPtr par,uint f,out uint tid);
-            [DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr h,uint ms);
             [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
           }
           '@
-          function I32([int]$x){ return ,([byte[]][BitConverter]::GetBytes($x)) }
-          function U32([uint32]$x){ return ,([byte[]][BitConverter]::GetBytes($x)) }
-          function PutI32([byte[]]$b,[int]$o,[int]$v){[BitConverter]::GetBytes($v).CopyTo($b,$o)}
-          function RunCase($h,[string]$name,[int[]]$p,[byte]$flag){
-            if($p.Count-ne26){throw "$name board width"}
-            $mem=[R]::VirtualAllocEx($h,[IntPtr]::Zero,0x1000,0x3000,0x40)
-            if($mem-eq[IntPtr]::Zero){throw 'VirtualAllocEx failed'}
-            try {
-              $base=[uint32]$mem.ToInt64(); $state=$base; $clsout=$base+0x100; $effout=$base+0x108; $code=$base+0x200
-              $st=New-Object byte[] 0x60
-              for($i=0;$i-lt26;$i++){$st[$i]=[byte]($p[$i] -band 0xff)}
-              PutI32 $st 0x20 -1; PutI32 $st 0x24 -1; PutI32 $st 0x28 1; PutI32 $st 0x2c 0; PutI32 $st 0x30 1; PutI32 $st 0x34 0
-              $w=[IntPtr]::Zero
-              if(-not[R]::WriteProcessMemory($h,[IntPtr]::new([long]$state),$st,$st.Length,[ref]$w)){throw 'write state failed'}
-              $c=New-Object 'System.Collections.Generic.List[byte]'
-              $c.Add(0xB8); $c.AddRange((U32 $state))
-              $src=$code+[uint32]$c.Count; $rel=[int](0x006F9580L-([long]$src+5)); $c.Add(0xE8); $c.AddRange((I32 $rel))
-              $c.Add(0xA3); $c.AddRange((U32 $clsout))
-              $c.Add(0xBA); $c.AddRange((U32 $state)); $c.Add(0xB9); $c.AddRange((U32 1)); $c.Add(0x6A); $c.Add($flag); $c.Add(0x6A); $c.Add(1); $c.Add(0x31); $c.Add(0xC0)
-              $src=$code+[uint32]$c.Count; $rel=[int](0x009DAD30L-([long]$src+5)); $c.Add(0xE8); $c.AddRange((I32 $rel))
-              $c.Add(0xDD); $c.Add(0x1D); $c.AddRange((U32 $effout)); $c.Add(0xC3)
-              $cb=$c.ToArray(); if(-not[R]::WriteProcessMemory($h,[IntPtr]::new([long]$code),$cb,$cb.Length,[ref]$w)){throw 'write code failed'}
-              $tid=0; $th=[R]::CreateRemoteThread($h,[IntPtr]::Zero,0,[IntPtr]::new([long]$code),[IntPtr]::Zero,0,[ref]$tid)
-              if($th-eq[IntPtr]::Zero){throw 'CreateRemoteThread failed'}
-              try {if([R]::WaitForSingleObject($th,10000)-ne0){throw 'remote call timeout'}} finally {[R]::CloseHandle($th)|Out-Null}
-              $out=New-Object byte[] 16; $r=[IntPtr]::Zero; if(-not[R]::ReadProcessMemory($h,[IntPtr]::new([long]$clsout),$out,$out.Length,[ref]$r)){throw 'read result failed'}
-              $cls=[BitConverter]::ToInt32($out,0); $eff=[BitConverter]::ToDouble($out,8)
-              "$name`tflag=$flag`tclass=$cls`teff=$([double]$eff)" | Tee-Object -FilePath ./r36-internal-oracle.txt -Append
-            } finally {[R]::VirtualFreeEx($h,$mem,0,0x8000)|Out-Null}
+          $proc=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
+          if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
+          function ReadBytes([long]$va,[int]$len){
+            $b=New-Object byte[] $len; $r=[IntPtr]::Zero
+            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$b,$len,[ref]$r)){throw "read failed 0x$($va.ToString('x'))"}
+            if($r.ToInt64()-ne$len){throw "short read 0x$($va.ToString('x')) got=$($r.ToInt64())"}
+            return ,$b
           }
-          $proc=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
-          $h=[R]::OpenProcess(0x1F0FFF,$false,$proc.Id); if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
           try {
-            $boards=@(
-              @('START', @(0,2,0,0,0,0,-5,0,-3,0,0,0,5,-5,0,0,0,3,0,5,0,0,0,0,-2,0)),
-              @('RACE',  @(0,0,0,0,0,-5,-5,0,0,0,0,-5,0,0,0,0,0,5,5,5,0,0,0,0,0,0)),
-              @('BEAR',  @(0,3,3,3,3,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-3,-3,-3,-3,-3,0)),
-              @('CONTACT',@(0,2,0,0,0,-2,-3,0,-2,0,0,0,5,-5,0,0,0,3,0,5,0,2,0,0,-2,0)),
-              @('MIDRACE',@(0,0,0,0,-2,-3,-5,0,0,0,-5,0,0,0,0,5,5,3,2,0,0,0,0,0,0,0))
-            )
-            foreach($b in $boards){RunCase $h $b[0] $b[1] 1; RunCase $h $b[0] $b[1] 0}
-            'R36_INTERNAL_ORACLE=PASS'|Tee-Object -FilePath ./r36-internal-oracle-summary.txt
-          } finally {[R]::CloseHandle($h)|Out-Null}
-      - name: Upload internal oracle
+            $g=ReadBytes 0x00A12620 0x30
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'eff_globals_a12620.bin'),$g)
+            for($o=0;$o-le0x1c;$o+=4){
+              $va=0x00A12620+$o
+              $u=[BitConverter]::ToUInt32($g,$o)
+              $f=[BitConverter]::ToSingle($g,$o)
+              "GLOBAL va=0x$($va.ToString('x')) u32=$u float=$([single]$f) hex=0x$($u.ToString('x8'))" | Tee-Object -FilePath ./r36-efficiency-components.txt -Append
+            }
+            $c=ReadBytes 0x009DAD20 0xD0
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'eff_constants_9dad20.bin'),$c)
+            foreach($va in @(0x009DAD20L,0x009DAD24L,0x009DAD28L,0x009DADECL)){
+              $o=[int]($va-0x009DAD20L)
+              $u=[BitConverter]::ToUInt32($c,$o)
+              $f=[BitConverter]::ToSingle($c,$o)
+              "CONST va=0x$($va.ToString('x')) u32=$u float=$([single]$f) hex=0x$($u.ToString('x8'))" | Tee-Object -FilePath ./r36-efficiency-components.txt -Append
+            }
+            $cls=ReadBytes 0x006F9000 0x3000
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'classifier_6f9000.bin'),$cls)
+            $helpers=ReadBytes 0x009DAA00 0x400
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'eff_helpers_9daa00.bin'),$helpers)
+            'R36_EFFICIENCY_CONSTANTS_CLASSIFIER_BODY=PASS' | Tee-Object -FilePath ./r36-efficiency-summary.txt
+          } finally {[Mem]::CloseHandle($h)|Out-Null}
+      - name: Upload exact efficiency evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-xg-classifier-efficiency-internal-oracle
+          name: r36-xg-efficiency-constants-classifier-body
           path: |
-            r36-internal-oracle.txt
-            r36-internal-oracle-summary.txt
+            eff_globals_a12620.bin
+            eff_constants_9dad20.bin
+            classifier_6f9000.bin
+            eff_helpers_9daa00.bin
+            r36-efficiency-components.txt
+            r36-efficiency-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
