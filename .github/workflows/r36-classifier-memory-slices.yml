@@ -1,4 +1,4 @@
-name: R36.28 XG Classifier Tail
+name: R36.29 XG Classifier Override Global
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Dump classifier tail
+      - name: Read classifier override global
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -46,21 +46,20 @@ jobs:
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
           try {
-            $va=0x006FB000L; $len=0x2000
-            $b=New-Object byte[] $len; $r=[IntPtr]::Zero
-            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$b,$len,[ref]$r)){throw 'read classifier tail failed'}
-            if($r.ToInt64()-ne$len){throw "short read got=$($r.ToInt64())"}
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'classifier_tail_6fb000.bin'),$b)
-            'R36_CLASSIFIER_TAIL=PASS' | Tee-Object -FilePath ./r36-classifier-tail-summary.txt
+            $b=New-Object byte[] 4; $r=[IntPtr]::Zero
+            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new(0x00A0D700L),$b,4,[ref]$r)){throw 'read failed'}
+            $v=[BitConverter]::ToInt32($b,0)
+            "A0D700=$v" | Tee-Object -FilePath ./r36-classifier-global.txt
+            'R36_CLASSIFIER_OVERRIDE_GLOBAL=PASS' | Tee-Object -FilePath ./r36-classifier-global-summary.txt
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-      - name: Upload classifier tail
+      - name: Upload classifier global
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-xg-classifier-tail
+          name: r36-xg-classifier-override-global
           path: |
-            classifier_tail_6fb000.bin
-            r36-classifier-tail-summary.txt
+            r36-classifier-global.txt
+            r36-classifier-global-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
