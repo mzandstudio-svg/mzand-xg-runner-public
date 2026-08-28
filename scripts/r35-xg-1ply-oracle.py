@@ -77,12 +77,35 @@ def extract_raw_cube(path: Path) -> dict:
     return exact[-1] if exact else analyzed[-1]
 
 
-def ctrl_1(hwnd: int) -> None:
-    user32.PostMessageW(hwnd, WM_KEYDOWN, VK_CONTROL, 0)
-    user32.PostMessageW(hwnd, WM_KEYDOWN, VK_1, 0)
-    user32.PostMessageW(hwnd, WM_KEYUP, VK_1, 0)
-    user32.PostMessageW(hwnd, WM_KEYUP, VK_CONTROL, 0)
-    time.sleep(0.5)
+def analyze_cube_exact(auto: XGAutomator) -> None:
+    """
+    Trigger XG cube analysis through the authoritative WM_COMMAND path.
+
+    Do not rely on Ctrl+1 accelerator translation in the hidden/headless
+    window: posted key messages can reach the VCL window without producing
+    the menu command.  ANALYZE_DOUBLE is taken from the detected XG command
+    profile (2.10 => 265).
+    """
+    print(
+        f"R50D_ANALYZE_DOUBLE_CMD={auto.cmd.ANALYZE_DOUBLE} "
+        f"profile={auto.cmd.version}"
+    )
+
+    auto.send_command(auto.cmd.ANALYZE_DOUBLE)
+
+    # Give the evaluator time to create/update the analyzed CubeEntry.
+    # Cube 1-ply evaluation is fast, but the runner/XG GUI state update is
+    # asynchronous.
+    deadline = time.time() + 12.0
+
+    while time.time() < deadline:
+        try:
+            auto._dismiss_unexpected_dialogs(accept=True)
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    print("R50D_ANALYZE_DOUBLE_SETTLED=YES")
 
 
 def _recent_xgp_candidates(start_time: float, wanted: Path) -> list[Path]:
@@ -247,7 +270,7 @@ def main() -> int:
                 try:
                     print(f"R35_BEGIN index={i} id={rid}")
                     auto.import_xgid_from_file(row["xgid"])
-                    ctrl_1(int(auto._hwnd))
+                    analyze_cube_exact(auto)
                     xgp = (args.xgp_dir / f"{rid}.xgp").resolve()
                     print(f"R35_XGP_ABSOLUTE={xgp}")
                     export_xgp(auto, xgp)
