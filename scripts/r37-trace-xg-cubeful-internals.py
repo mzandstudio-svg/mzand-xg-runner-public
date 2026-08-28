@@ -47,7 +47,7 @@ k32.Wow64SetThreadContext.argtypes=[wt.HANDLE,ctypes.POINTER(WOW64_CONTEXT)]; k3
 k32.CloseHandle.argtypes=[wt.HANDLE]
 
 # R36 proved the loaded image RVA and direct call site.
-BP_RVA=0x5dc8e9  # before call xg_cube_efficiency dispatcher in main cubeful path
+BP_RVA=0x5dc8e9
 
 def rpm(h,addr,n):
     b=(ctypes.c_ubyte*n)(); got=ctypes.c_size_t()
@@ -64,7 +64,6 @@ def i32(h,addr): return struct.unpack('<i',rpm(h,addr,4))[0]
 def u32(h,addr): return struct.unpack('<I',rpm(h,addr,4))[0]
 
 def module_base(pid):
-    # XG2 is non-ASLR in the observed build; verify MZ at canonical base first.
     h=k32.OpenProcess(PROCESS_ALL_ACCESS,False,pid)
     if not h: raise OSError(ctypes.get_last_error(),'OpenProcess')
     try:
@@ -72,14 +71,13 @@ def module_base(pid):
     finally: k32.CloseHandle(h)
     raise RuntimeError('XG image base not 0x400000; R37 refuses to guess')
 
-def trigger_ctrl1():
+class RECT(ctypes.Structure):
+    _fields_=[('Left',ctypes.c_long),('Top',ctypes.c_long),('Right',ctypes.c_long),('Bottom',ctypes.c_long)]
+
+def trigger_analyze_position():
     time.sleep(3.0)
-    import pyautogui
-    import ctypes
     user32=ctypes.windll.user32
     hwnd=0
-    # Find visible top-level window owned by this process indirectly via title/class is brittle;
-    # foreground current XG window by enumerating windows.
     target_pid=PID
     @ctypes.WINFUNCTYPE(ctypes.c_bool, wt.HWND, wt.LPARAM)
     def cb(w,l):
@@ -92,8 +90,23 @@ def trigger_ctrl1():
     if not hwnd:
         print('R37_TRIGGER_FAIL no visible XG window',flush=True); return
     user32.ShowWindow(hwnd,5); user32.SetForegroundWindow(hwnd); time.sleep(.4)
-    print(f'R37_TRIGGER_CTRL1 HWND=0x{int(hwnd):x}',flush=True)
-    pyautogui.hotkey('ctrl','1')
+    menu=user32.GetMenu(hwnd)
+    if not menu:
+        print('R37_TRIGGER_FAIL no main menu',flush=True); return
+    top=RECT()
+    if not user32.GetMenuItemRect(hwnd,menu,4,ctypes.byref(top)):
+        print('R37_TRIGGER_FAIL analyze top rect',flush=True); return
+    def click(x,y):
+        user32.SetCursorPos(int(x),int(y)); time.sleep(.15)
+        user32.mouse_event(2,0,0,0,0); time.sleep(.08); user32.mouse_event(4,0,0,0,0)
+    click((top.Left+top.Right)//2,(top.Top+top.Bottom)//2)
+    time.sleep(.5)
+    sub=user32.GetSubMenu(menu,4)
+    pos=RECT()
+    if not sub or not user32.GetMenuItemRect(hwnd,sub,1,ctypes.byref(pos)):
+        print('R37_TRIGGER_FAIL analyze position rect',flush=True); return
+    print(f'R37_TRIGGER_ANALYZE_POSITION HWND=0x{int(hwnd):x} RECT={pos.Left},{pos.Top},{pos.Right},{pos.Bottom}',flush=True)
+    click((pos.Left+pos.Right)//2,(pos.Top+pos.Bottom)//2)
 
 PID=int(sys.argv[1]); OUT=Path(sys.argv[2]); OUT.parent.mkdir(parents=True,exist_ok=True)
 base=module_base(PID); bp=base+BP_RVA
@@ -104,7 +117,7 @@ print(f'R37_ATTACH PID={PID} BASE=0x{base:x} BP=0x{bp:x} ORIG={orig.hex()}',flus
 if not k32.DebugActiveProcess(PID): raise OSError(ctypes.get_last_error(),'DebugActiveProcess')
 try:
     wpm(h,bp,b'\xCC')
-    threading.Thread(target=trigger_ctrl1,daemon=True).start()
+    threading.Thread(target=trigger_analyze_position,daemon=True).start()
     deadline=time.time()+90; captured=False
     with OUT.open('w',encoding='utf-8') as f:
         while time.time()<deadline and not captured:
@@ -113,7 +126,6 @@ try:
             code,pid,tid=struct.unpack_from('<III',raw.raw,0)
             status=DBG_CONTINUE
             if code==EXCEPTION_DEBUG_EVENT:
-                # EXCEPTION_DEBUG_INFO starts at offset 12; ExceptionCode is first DWORD.
                 exc=struct.unpack_from('<I',raw.raw,12)[0]
                 th=k32.OpenThread(THREAD_ALL_ACCESS,False,tid)
                 if th:
@@ -121,18 +133,15 @@ try:
                     if k32.Wow64GetThreadContext(th,ctypes.byref(ctx)):
                         if exc==0x80000003 and ctx.Eip==bp+1:
                             ebp=ctx.Ebp; ebx=ctx.Ebx
-                            # Restore instruction and rewind EIP.
                             wpm(h,bp,orig); ctx.Eip=bp
                             k32.Wow64SetThreadContext(th,ctypes.byref(ctx))
-                            def dump_arr(addr,count):
-                                return [f32(h,addr+4*i) for i in range(count)]
+                            def dump_arr(addr,count): return [f32(h,addr+4*i) for i in range(count)]
                             f.write(f'PID={PID}\nBASE=0x{base:08x}\nTHREAD={tid}\nEBP=0x{ebp:08x}\nEBX=0x{ebx:08x}\n')
                             f.write(f'LIVE_ENDPOINT_F8={f32(h,ebp-0x8):.9g}\n')
                             f.write(f'DEAD_ENDPOINT_F4={f32(h,ebp-0xc):.9g}\n')
                             f.write('KNOT_X_EBP_M90='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x90,4))+'\n')
                             f.write('KNOT_Y_EBP_M80='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x80,4))+'\n')
                             f.write('LOCAL_C0='+','.join(f'{x:.9g}' for x in dump_arr(ebp-0x40,8))+'\n')
-                            # Main cubeful context copied at EDI=EBP-0xB4 immediately before endpoint call.
                             f.write('CTX_EBP_MB4_DWORDS='+','.join(f'0x{u32(h,ebp-0xb4+4*i):08x}' for i in range(24))+'\n')
                             f.write('CTX_EBP_MB4_FLOATS='+','.join(f'{f32(h,ebp-0xb4+4*i):.9g}' for i in range(24))+'\n')
                             f.write(f'EBX_CUBE_OWNER_FIELD_2C={i32(h,ebx+0x2c)}\n')
