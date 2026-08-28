@@ -42,7 +42,6 @@ def class3_efficiency(board: Sequence[int]) -> float:
 
 
 def _positive_front(board: Sequence[int]) -> int:
-    # 0x9DAB60 with edx > 0: scan 25..0, default 0.
     for i in range(25, -1, -1):
         if board[i] > 0:
             return i
@@ -50,7 +49,6 @@ def _positive_front(board: Sequence[int]) -> int:
 
 
 def _lowest_negative_index(board: Sequence[int]) -> int:
-    # 0x9DAB60 with edx <= 0 returns 25-i; caller converts back to i.
     for i in range(26):
         if board[i] < 0:
             return i
@@ -66,14 +64,8 @@ def _checker_count(board: Sequence[int], sign: int) -> int:
 
 
 def board_efficiency(board: Sequence[int], side: int, helper_flag: bool) -> float:
-    """Portable equivalent of XG 0x9DABA0.
-
-    side corresponds to EDX at 0x9DABA0. helper_flag corresponds to CL and is
-    already the caller's inverted flag (!flag) when used from 0x9DAD30.
-    """
+    """Portable equivalent of XG 0x9DABA0."""
     _require_board(board)
-
-    # Leading geometry/contact test.
     if _positive_front(board) > _lowest_negative_index(board):
         return 1.0
 
@@ -91,8 +83,7 @@ def board_efficiency(board: Sequence[int], side: int, helper_flag: bool) -> floa
             return 0.75
         return XG_RACE_MAX
 
-    # XG uses count(sign=-side), then only tests count >= 2.
-    n = _checker_count(board, -1 if side > 0 else 1)
+    n = _checker_count(board, -side)
     return XG_RACE_MAX if n >= 2 else 0.0
 
 
@@ -106,11 +97,7 @@ def cube_efficiency(
     state20: int = -1,
     state24: int = -1,
 ) -> float:
-    """Portable arithmetic equivalent of XG 0x9DAD30.
-
-    `raw_class` is the direct result of 0x6F9580; this function intentionally
-    does not use the separate 0x9D5B30 class-3 -> 10/11 promotion wrapper.
-    """
+    """Portable arithmetic equivalent of XG 0x9DAD30."""
     _require_board(board)
     if global_force_one:
         return 1.0
@@ -152,10 +139,9 @@ def selftest() -> None:
             if err > tol:
                 raise AssertionError(f'{name} mismatch: {got} vs {expected}')
 
-    # Direct structural checks for branches recovered from assembly.
     assert abs(cube_efficiency(ORACLE_CASES[0][1], 7) - XG_EFF_CLASS7) < 1e-15
     assert cube_efficiency(ORACLE_CASES[0][1], 4, global_force_one=True) == 1.0
-    assert blend_live_dead(0.8, 0.2, 0.75) == 0.65
+    assert abs(blend_live_dead(0.8, 0.2, 0.75) - 0.65) < 1e-15
     print('R38_PORTABLE_XG_CUBE_EFFICIENCY_SELFTEST=PASS')
 
 
