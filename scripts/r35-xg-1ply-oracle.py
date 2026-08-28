@@ -131,6 +131,9 @@ def main() -> int:
     print(f"R35_CONNECTED profile={auto.cmd.version}")
 
     ok = fail = 0
+    args.output = args.output.resolve()
+    args.xgp_dir = args.xgp_dir.resolve()
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.xgp_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -144,7 +147,8 @@ def main() -> int:
                     print(f"R35_BEGIN index={i} id={rid}")
                     auto.import_xgid_from_file(row["xgid"])
                     ctrl_1(int(auto._hwnd))
-                    xgp = args.xgp_dir / f"{rid}.xgp"
+                    xgp = (args.xgp_dir / f"{rid}.xgp").resolve()
+                    print(f"R35_XGP_ABSOLUTE={xgp}")
                     export_xgp(auto, xgp)
                     c = extract_raw_cube(xgp)
                     rec.update(level=c["level"], flag=c["flag"], activeP=c["activeP"], cubeB=c["cubeB"], equB=c["equB"], equDouble=c["equDouble"], equDrop=c["equDrop"])
