@@ -1,4 +1,4 @@
-name: R36.27 XG Efficiency Constants and Classifier Body
+name: R36.28 XG Classifier Tail
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
-      - name: Dump exact efficiency constants and classifier body
+      - name: Dump classifier tail
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -45,47 +45,22 @@ jobs:
           $proc=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
           $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
           if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
-          function ReadBytes([long]$va,[int]$len){
-            $b=New-Object byte[] $len; $r=[IntPtr]::Zero
-            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$b,$len,[ref]$r)){throw "read failed 0x$($va.ToString('x'))"}
-            if($r.ToInt64()-ne$len){throw "short read 0x$($va.ToString('x')) got=$($r.ToInt64())"}
-            return ,$b
-          }
           try {
-            $g=ReadBytes 0x00A12620 0x30
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'eff_globals_a12620.bin'),$g)
-            for($o=0;$o-le0x1c;$o+=4){
-              $va=0x00A12620+$o
-              $u=[BitConverter]::ToUInt32($g,$o)
-              $f=[BitConverter]::ToSingle($g,$o)
-              "GLOBAL va=0x$($va.ToString('x')) u32=$u float=$([single]$f) hex=0x$($u.ToString('x8'))" | Tee-Object -FilePath ./r36-efficiency-components.txt -Append
-            }
-            $c=ReadBytes 0x009DAD20 0xD0
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'eff_constants_9dad20.bin'),$c)
-            foreach($va in @(0x009DAD20L,0x009DAD24L,0x009DAD28L,0x009DADECL)){
-              $o=[int]($va-0x009DAD20L)
-              $u=[BitConverter]::ToUInt32($c,$o)
-              $f=[BitConverter]::ToSingle($c,$o)
-              "CONST va=0x$($va.ToString('x')) u32=$u float=$([single]$f) hex=0x$($u.ToString('x8'))" | Tee-Object -FilePath ./r36-efficiency-components.txt -Append
-            }
-            $cls=ReadBytes 0x006F9000 0x3000
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'classifier_6f9000.bin'),$cls)
-            $helpers=ReadBytes 0x009DAA00 0x400
-            [IO.File]::WriteAllBytes((Join-Path $PWD 'eff_helpers_9daa00.bin'),$helpers)
-            'R36_EFFICIENCY_CONSTANTS_CLASSIFIER_BODY=PASS' | Tee-Object -FilePath ./r36-efficiency-summary.txt
+            $va=0x006FB000L; $len=0x2000
+            $b=New-Object byte[] $len; $r=[IntPtr]::Zero
+            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$b,$len,[ref]$r)){throw 'read classifier tail failed'}
+            if($r.ToInt64()-ne$len){throw "short read got=$($r.ToInt64())"}
+            [IO.File]::WriteAllBytes((Join-Path $PWD 'classifier_tail_6fb000.bin'),$b)
+            'R36_CLASSIFIER_TAIL=PASS' | Tee-Object -FilePath ./r36-classifier-tail-summary.txt
           } finally {[Mem]::CloseHandle($h)|Out-Null}
-      - name: Upload exact efficiency evidence
+      - name: Upload classifier tail
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: r36-xg-efficiency-constants-classifier-body
+          name: r36-xg-classifier-tail
           path: |
-            eff_globals_a12620.bin
-            eff_constants_9dad20.bin
-            classifier_6f9000.bin
-            eff_helpers_9daa00.bin
-            r36-efficiency-components.txt
-            r36-efficiency-summary.txt
+            classifier_tail_6fb000.bin
+            r36-classifier-tail-summary.txt
             r35-proven-startup-summary.txt
           if-no-files-found: ignore
           retention-days: 14
