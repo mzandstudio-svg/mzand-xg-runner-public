@@ -1,0 +1,22 @@
+name: R42 C++ XG Classifier Dispatcher Reference
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - reference/xg_cube_reference.cpp
+      - .github/workflows/r42-cpp-xg-reference.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build reference
+        run: g++ -std=c++17 -O2 -Wall -Wextra -pedantic reference/xg_cube_reference.cpp -o /tmp/xg_cube_reference
+      - name: Run reference selftest
+        run: /tmp/xg_cube_reference
