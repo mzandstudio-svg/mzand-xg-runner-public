@@ -131,16 +131,49 @@ return eff
 
 No unresolved arithmetic remains in the class-3 efficiency branch.
 
+## Live/dead endpoint consumption
+
+Both independent recovered callers at `0x9DC8E9` and `0x9DCE97` use the same arithmetic immediately after calling `0x9DAD30`:
+
+```text
+eff = cube_efficiency_9DAD30(...)
+current_equity = eff * live_endpoint + (1.0 - eff) * dead_endpoint
+state[0x54] = current_equity
+```
+
+In the recovered stack layout:
+- `[ebp-0x08]` is the live endpoint,
+- `[ebp-0x0c]` is the dead endpoint,
+- `[ebp-0x10]` stores the dispatcher efficiency.
+
+Assembly sequence at both callers:
+
+```text
+fld  [ebp-0x10]      ; eff
+fmul [ebp-0x08]      ; eff * live
+fld  1.0
+fsub [ebp-0x10]      ; 1-eff
+fmul [ebp-0x0c]      ; (1-eff) * dead
+faddp
+fstp [state+0x54]
+```
+
+Therefore the endpoint blend semantics are recovered and no GUI-triggered breakpoint is required to infer them.
+
+## Classifier distinction
+
+`0x9DAD30` calls raw classifier `0x6F9580` directly. A separate wrapper at `0x9D5B30` copies the state, calls `0x6F9580`, and only when raw class is `3` calls `0x6F94AC`; probability thresholds can promote that wrapper result to class `10` or `11`. These are distinct semantics and must not be conflated in a portable port.
+
 ## Classifier override
 
 R36.29 observed `A0D700=0` in the standard startup state, so the normal path does not force the classifier override.
 
 ## Remaining production gate
 
-The efficiency dispatcher arithmetic is now recovered. Remaining work before BG1 production promotion:
-1. recover/port the final classifier semantics, including the proven class-3 promotion wrapper where applicable,
-2. recover the live/dead endpoint consumption around the `0x9DBA90 -> 0x9DC770` caller chain,
-3. validate the portable dispatcher against direct XG internal-oracle calls,
+The efficiency dispatcher arithmetic and live/dead blend are now recovered. Remaining work before BG1 production promotion:
+1. recover/port the raw classifier `0x6F9580` semantics needed by the dispatcher,
+2. validate a portable dispatcher implementation against direct XG internal-oracle calls,
+3. integrate only after the portable diagnostic layer passes,
 4. run the 68-position XG regression and require tolerance/action parity.
 
 Do not replace BG1 live-cube logic with a fitted Janowski scalar.
