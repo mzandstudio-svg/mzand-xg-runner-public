@@ -1,0 +1,20 @@
+name: R39 Portable XG Raw Classifier
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - scripts/r39-portable-xg-raw-classifier.py
+      - .github/workflows/r39-portable-xg-raw-classifier.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run recovered classifier selftest
+        run: python3 scripts/r39-portable-xg-raw-classifier.py
