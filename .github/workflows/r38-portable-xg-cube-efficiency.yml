@@ -1,0 +1,20 @@
+name: R38 Portable XG Cube Efficiency
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - scripts/r38-portable-xg-cube-efficiency.py
+      - .github/workflows/r38-portable-xg-cube-efficiency.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run recovered dispatcher selftest
+        run: python3 scripts/r38-portable-xg-cube-efficiency.py
