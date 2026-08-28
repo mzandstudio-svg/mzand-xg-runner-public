@@ -107,27 +107,40 @@ For the other selector branch, checker count <2 returns `0.0`; otherwise it retu
 
 ## Class 3 helper `0x9DAC90`
 
-Recovered numeric transform:
+R36.30 recovered both dependencies completely.
+
+`0x9D7C10(state, side)` computes a pip-distance metric. For `side=+1` it uses the raw 26-byte board. For `side=-1` it first mirrors the board through `0x9D7AE0`, then applies the same calculation. The calculation is:
 
 ```text
-a = helper_9D7C10(state, +1)
-b = helper_9D7C10(state, -1)
-M = helper_463A00(&a, 1)
+pip_metric(board) = sum(i * board[i]) for i=0..25 where board[i] > 0
+```
+
+`0x463A00(ptr, n)` is an integer maximum helper. With `n=1` and `ptr=&a`, it returns `max(a,b)` over the two adjacent int32 values.
+
+Therefore the portable class-3 transform is exactly:
+
+```text
+P1 = pip_metric(raw_board)
+P2 = pip_metric(mirror_for_opponent(raw_board))
+M  = max(P1, P2)
+
 eff = 0.5 + (0.72 - 0.5) * (M - 30) / 90
 eff = clamp(eff, 0.5, 0.75)
 return eff
 ```
 
-The semantics/portable implementation of `0x9D7C10` and `0x463A00` remain the only unresolved part of the class-3 efficiency branch. R36.30 is dedicated to dumping those two helper bodies.
+No unresolved arithmetic remains in the class-3 efficiency branch.
 
 ## Classifier override
 
 R36.29 observed `A0D700=0` in the standard startup state, so the normal path does not force the classifier override.
 
-## Production gate
+## Remaining production gate
 
-Do not replace BG1 live-cube logic with a fitted Janowski scalar. Port only after:
-1. class-3 helper semantics are recovered,
-2. classifier is ported/validated,
-3. the dispatcher matches the internal oracle,
-4. the 68-position XG regression passes the required tolerance/action parity.
+The efficiency dispatcher arithmetic is now recovered. Remaining work before BG1 production promotion:
+1. recover/port the final classifier semantics, including the proven class-3 promotion wrapper where applicable,
+2. recover the live/dead endpoint consumption around the `0x9DBA90 -> 0x9DC770` caller chain,
+3. validate the portable dispatcher against direct XG internal-oracle calls,
+4. run the 68-position XG regression and require tolerance/action parity.
+
+Do not replace BG1 live-cube logic with a fitted Janowski scalar.
