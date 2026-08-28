@@ -46,7 +46,6 @@ k32.Wow64GetThreadContext.argtypes=[wt.HANDLE,ctypes.POINTER(WOW64_CONTEXT)]; k3
 k32.Wow64SetThreadContext.argtypes=[wt.HANDLE,ctypes.POINTER(WOW64_CONTEXT)]; k32.Wow64SetThreadContext.restype=wt.BOOL
 k32.CloseHandle.argtypes=[wt.HANDLE]
 
-# R36 proved the loaded image RVA and direct call site.
 BP_RVA=0x5dc8e9
 
 def rpm(h,addr,n):
@@ -71,11 +70,9 @@ def module_base(pid):
     finally: k32.CloseHandle(h)
     raise RuntimeError('XG image base not 0x400000; R37 refuses to guess')
 
-class RECT(ctypes.Structure):
-    _fields_=[('Left',ctypes.c_long),('Top',ctypes.c_long),('Right',ctypes.c_long),('Bottom',ctypes.c_long)]
-
 def trigger_analyze_position():
     time.sleep(3.0)
+    import pyautogui
     user32=ctypes.windll.user32
     hwnd=0
     target_pid=PID
@@ -89,24 +86,11 @@ def trigger_analyze_position():
     user32.EnumWindows(cb,0)
     if not hwnd:
         print('R37_TRIGGER_FAIL no visible XG window',flush=True); return
-    user32.ShowWindow(hwnd,5); user32.SetForegroundWindow(hwnd); time.sleep(.4)
-    menu=user32.GetMenu(hwnd)
-    if not menu:
-        print('R37_TRIGGER_FAIL no main menu',flush=True); return
-    top=RECT()
-    if not user32.GetMenuItemRect(hwnd,menu,4,ctypes.byref(top)):
-        print('R37_TRIGGER_FAIL analyze top rect',flush=True); return
-    def click(x,y):
-        user32.SetCursorPos(int(x),int(y)); time.sleep(.15)
-        user32.mouse_event(2,0,0,0,0); time.sleep(.08); user32.mouse_event(4,0,0,0,0)
-    click((top.Left+top.Right)//2,(top.Top+top.Bottom)//2)
-    time.sleep(.5)
-    sub=user32.GetSubMenu(menu,4)
-    pos=RECT()
-    if not sub or not user32.GetMenuItemRect(hwnd,sub,1,ctypes.byref(pos)):
-        print('R37_TRIGGER_FAIL analyze position rect',flush=True); return
-    print(f'R37_TRIGGER_ANALYZE_POSITION HWND=0x{int(hwnd):x} RECT={pos.Left},{pos.Top},{pos.Right},{pos.Bottom}',flush=True)
-    click((pos.Left+pos.Right)//2,(pos.Top+pos.Bottom)//2)
+    user32.ShowWindow(hwnd,5)
+    user32.SetForegroundWindow(hwnd)
+    time.sleep(.7)
+    print(f'R37_TRIGGER_CTRL1 HWND=0x{int(hwnd):x}',flush=True)
+    pyautogui.hotkey('ctrl','1')
 
 PID=int(sys.argv[1]); OUT=Path(sys.argv[2]); OUT.parent.mkdir(parents=True,exist_ok=True)
 base=module_base(PID); bp=base+BP_RVA
