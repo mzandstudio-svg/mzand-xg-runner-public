@@ -8,6 +8,8 @@ import sys
 import time
 from pathlib import Path
 
+from ankigammon.utils.xg_auto.automator import XGAutomator
+
 p = Path(__file__).resolve().with_name("r74-xg-checker-depth-keyboard-oracle.py")
 spec = importlib.util.spec_from_file_location("r74_keyboard_impl", p)
 if spec is None or spec.loader is None:
@@ -15,6 +17,42 @@ if spec is None or spec.loader is None:
 mod = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
+
+# R74 matrix runs in a fresh isolated Windows VM, so clipboard import is safe
+# and avoids the flaky common-file-dialog path used by import_xgid_from_file().
+# The underlying XGAutomator.import_xgid() still validates the XGID, sends the
+# official IMPORT_POS_CLIPBOARD command, and waits for the position to load.
+# Keep retries local to the capture harness; exported XGP EvalLevel remains the
+# only authority for accepting a depth result.
+def _matrix_import_xgid(self: XGAutomator, xgid: str) -> None:
+    last = None
+    for attempt in range(1, 4):
+        try:
+            print(
+                f"R74_IMPORT_XGID mode=clipboard attempt={attempt}",
+                flush=True,
+            )
+            self.import_xgid(xgid)
+            print(
+                f"R74_IMPORT_XGID=PASS mode=clipboard attempt={attempt}",
+                flush=True,
+            )
+            return
+        except Exception as exc:
+            last = exc
+            print(
+                f"R74_IMPORT_XGID=RETRY attempt={attempt} error={exc}",
+                flush=True,
+            )
+            try:
+                self._dismiss_unexpected_dialogs(accept=False)
+            except Exception:
+                pass
+            time.sleep(1.0)
+    raise RuntimeError(f"R74 clipboard XGID import failed after retries: {last}")
+
+
+XGAutomator.import_xgid_from_file = _matrix_import_xgid
 
 # R74 matrix runs exactly one position in a fresh Windows VM.  The legacy
 # R35 fallback recursively walks USERPROFILE/TEMP/LOCALAPPDATA/APPDATA looking
