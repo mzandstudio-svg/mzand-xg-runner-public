@@ -138,30 +138,33 @@ def analyze_level(auto, helpers, xgid: str, label: str, target: int,
     auto.send_command(auto.cmd.CLEAR_ANALYZE)
     time.sleep(0.8)
 
-    # Ctrl+1..4 is the official XG level-selection shortcut.  In the hosted
-    # headless session we proved that injecting it alone does not create
-    # MoveEntry.DataMoves, so do not treat the shortcut itself as an analysis
-    # command.  Select the requested level first, then invoke XG's authoritative
-    # ANALYZE_POSITION WM_COMMAND.  The exported binary EvalLevel remains the
-    # sole acceptance authority: if the shortcut is a no-op, this test fails.
+    # Ctrl+1..4 is XG's official shortcut for the requested checker depth.
+    # The shortcut selects/configures the level; actual candidate analysis must
+    # follow XG's production position-analysis lifecycle.  AnkiGammon's real
+    # XGAnalyzer.analyze_position() calls XGAutomator.run_analysis(), which
+    # sends ANALYZE_MATCH, handles the Analyze Session dialog, and waits for
+    # completion.  Earlier R74 attempts using ANALYZE_POSITION created no
+    # MoveEntry.DataMoves, so mirror that production lifecycle here.
+    #
+    # The shortcut itself is NOT trusted as proof.  Exported XGP EvalLevel is
+    # still the sole authority: if Ctrl+N is a no-op or the session dialog
+    # resets the depth, the target binary level will be absent and the gate
+    # fails honestly.
     press_ctrl_digit(int(auto._hwnd), digit)
     time.sleep(0.4)
-    print(
-        f"R74_ANALYZE_POSITION_CMD={auto.cmd.ANALYZE_POSITION} "
-        f"after=Ctrl+{digit} label={label}",
-        flush=True,
-    )
-    auto.send_command(auto.cmd.ANALYZE_POSITION)
-    print(f"R74_ANALYZE_POSITION_SENT=YES label={label}", flush=True)
-    print(f"R74_WAIT label={label} seconds={wait_s}", flush=True)
 
-    deadline = time.time() + wait_s
-    while time.time() < deadline:
-        try:
-            auto._dismiss_unexpected_dialogs(accept=True)
-        except Exception:
-            pass
-        time.sleep(min(1.0, max(0.05, deadline - time.time())))
+    old_timeout = auto.timeout
+    auto.timeout = max(float(old_timeout), float(wait_s) + 90.0)
+    try:
+        print(
+            f"R74_RUN_ANALYSIS_BEGIN label={label} after=Ctrl+{digit} "
+            f"analyze_match_cmd={auto.cmd.ANALYZE_MATCH} timeout={auto.timeout}",
+            flush=True,
+        )
+        auto.run_analysis()
+        print(f"R74_RUN_ANALYSIS=PASS label={label}", flush=True)
+    finally:
+        auto.timeout = old_timeout
 
     helpers.export_xgp(auto, out_xgp)
     print(
