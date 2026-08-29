@@ -1,0 +1,38 @@
+name: R68 XG Network Record Scan
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r68-xg-network-record-scan.yml
+      - scripts/r68-xg-network-record-scan.py
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          "XG_EXE=C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe" | Out-File $env:GITHUB_ENV -Append
+      - name: Scan decoded network records
+        shell: powershell
+        run: |
+          python ./scripts/r68-xg-network-record-scan.py --xg-exe "$env:XG_EXE" --outdir ./r68-network-records
+          Get-Content ./r68-network-records/r68-network-records.tsv
+          Get-ChildItem ./r68-network-records/*-context.tsv -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName }
+      - name: Upload R68 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r68-xg-network-record-scan
+          path: r68-network-records/*
+          retention-days: 14
