@@ -1,0 +1,23 @@
+name: R58 XG Money Branch B Reference
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r58-xg-money-branch-b-reference.yml
+      - reference/xg_money_branch_b_reference.cpp
+      - notes/r58-xg-money-branch-b-static.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build R58 reference
+        run: g++ -std=c++17 -O2 -Wall -Wextra -pedantic reference/xg_money_branch_b_reference.cpp -o /tmp/r58
+      - name: Run R58 reference
+        run: /tmp/r58
