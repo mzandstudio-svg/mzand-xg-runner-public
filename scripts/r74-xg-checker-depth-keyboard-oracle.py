@@ -138,7 +138,21 @@ def analyze_level(auto, helpers, xgid: str, label: str, target: int,
     auto.send_command(auto.cmd.CLEAR_ANALYZE)
     time.sleep(0.8)
 
+    # Ctrl+1..4 is the official XG level-selection shortcut.  In the hosted
+    # headless session we proved that injecting it alone does not create
+    # MoveEntry.DataMoves, so do not treat the shortcut itself as an analysis
+    # command.  Select the requested level first, then invoke XG's authoritative
+    # ANALYZE_POSITION WM_COMMAND.  The exported binary EvalLevel remains the
+    # sole acceptance authority: if the shortcut is a no-op, this test fails.
     press_ctrl_digit(int(auto._hwnd), digit)
+    time.sleep(0.4)
+    print(
+        f"R74_ANALYZE_POSITION_CMD={auto.cmd.ANALYZE_POSITION} "
+        f"after=Ctrl+{digit} label={label}",
+        flush=True,
+    )
+    auto.send_command(auto.cmd.ANALYZE_POSITION)
+    print(f"R74_ANALYZE_POSITION_SENT=YES label={label}", flush=True)
     print(f"R74_WAIT label={label} seconds={wait_s}", flush=True)
 
     deadline = time.time() + wait_s
