@@ -1,0 +1,66 @@
+name: R70 XG True Network Access Trace
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r70-xg-true-network-access-trace.yml
+      - scripts/r70-xg-true-network-access-trace.py
+      - scripts/r59-xg-network-access-trace.py
+      - scripts/r59-prepare-checker-xgid.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trace:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          $ag=Join-Path $env:RUNNER_TEMP 'AnkiGammon'
+          git clone --depth 1 https://github.com/Deinonychus999/AnkiGammon.git $ag
+          python -m pip install --upgrade pip
+          python -m pip install -e $ag
+          python -m pip install capstone pywinauto pyautogui pymem
+      - name: Reach proven unpacked XG2 instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+      - name: Load deterministic checker position
+        shell: powershell
+        run: python ./scripts/r59-prepare-checker-xgid.py
+      - name: Trace true A/B/C/D Wih reads
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          New-Item -ItemType Directory -Force ./r70-trace | Out-Null
+          python ./scripts/r70-xg-true-network-access-trace.py --pid $xg.Id --xg-exe "$env:XG_EXE" --outdir ./r70-trace --seconds 55 --max-hits 64 2>&1 | Tee-Object -FilePath ./r70-console.txt
+          $rc=$LASTEXITCODE
+          if(Test-Path './r70-trace/r59-summary.txt'){Get-Content './r70-trace/r59-summary.txt'}
+          if(Test-Path './r70-trace/r59-hits.tsv'){Get-Content './r70-trace/r59-hits.tsv'}
+          if($rc-ne0){throw "R70 trace failed rc=$rc"}
+      - name: Upload R70 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r70-xg-true-network-access-trace
+          path: |
+            r70-trace/*
+            r70-console.txt
+            r35-proven-startup-summary.txt
+            r35-proven-startup-report.txt
+          retention-days: 14
