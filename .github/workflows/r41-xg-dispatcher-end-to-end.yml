@@ -1,0 +1,153 @@
+name: R41 XG Dispatcher End-to-End Crosscheck
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r41-xg-dispatcher-end-to-end.yml
+      - scripts/r38-portable-xg-cube-efficiency.py
+      - scripts/r39-portable-xg-raw-classifier.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crosscheck:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install eXtreme Gammon
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven ready XG instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
+      - name: Query internal classifier and dispatcher corpus
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class R41 {
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint a,bool i,int pid);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr VirtualAllocEx(IntPtr h,IntPtr a,uint s,uint t,uint p);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool VirtualFreeEx(IntPtr h,IntPtr a,uint s,uint t);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool WriteProcessMemory(IntPtr h,IntPtr a,byte[] b,int s,out IntPtr w);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool ReadProcessMemory(IntPtr h,IntPtr a,byte[] b,int s,out IntPtr r);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr CreateRemoteThread(IntPtr h,IntPtr sa,uint ss,IntPtr start,IntPtr par,uint f,out uint tid);
+            [DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr h,uint ms);
+            [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+          }
+          '@
+          function I32([int]$x){ return ,([byte[]][BitConverter]::GetBytes($x)) }
+          function U32([uint32]$x){ return ,([byte[]][BitConverter]::GetBytes($x)) }
+          function PutI32([byte[]]$b,[int]$o,[int]$v){[BitConverter]::GetBytes($v).CopyTo($b,$o)}
+          function RunCase($h,[int[]]$p,[byte]$flag){
+            if($p.Count-ne26){throw 'board width'}
+            $mem=[R41]::VirtualAllocEx($h,[IntPtr]::Zero,0x1000,0x3000,0x40)
+            if($mem-eq[IntPtr]::Zero){throw 'VirtualAllocEx failed'}
+            try {
+              $base=[uint32]$mem.ToInt64(); $state=$base; $clsout=$base+0x100; $effout=$base+0x108; $code=$base+0x200
+              $st=New-Object byte[] 0x60
+              for($i=0;$i-lt26;$i++){$st[$i]=[byte]($p[$i] -band 0xff)}
+              PutI32 $st 0x20 -1; PutI32 $st 0x24 -1; PutI32 $st 0x28 1; PutI32 $st 0x2c 0; PutI32 $st 0x30 1; PutI32 $st 0x34 0
+              $w=[IntPtr]::Zero
+              if(-not[R41]::WriteProcessMemory($h,[IntPtr]::new([long]$state),$st,$st.Length,[ref]$w)){throw 'write state failed'}
+              $c=New-Object 'System.Collections.Generic.List[byte]'
+              # raw class: EAX=state; call 0x6F9580; store EAX
+              $c.Add(0xB8); $c.AddRange((U32 $state))
+              $src=$code+[uint32]$c.Count; $rel=[int](0x006F9580L-([long]$src+5)); $c.Add(0xE8); $c.AddRange((I32 $rel))
+              $c.Add(0xA3); $c.AddRange((U32 $clsout))
+              # dispatcher ABI recovered in R36.26
+              $c.Add(0xBA); $c.AddRange((U32 $state))
+              $c.Add(0xB9); $c.AddRange((U32 1))
+              $c.Add(0x6A); $c.Add($flag)
+              $c.Add(0x6A); $c.Add(1)
+              $c.Add(0x31); $c.Add(0xC0)
+              $src=$code+[uint32]$c.Count; $rel=[int](0x009DAD30L-([long]$src+5)); $c.Add(0xE8); $c.AddRange((I32 $rel))
+              $c.Add(0xDD); $c.Add(0x1D); $c.AddRange((U32 $effout)); $c.Add(0xC3)
+              $cb=$c.ToArray()
+              if(-not[R41]::WriteProcessMemory($h,[IntPtr]::new([long]$code),$cb,$cb.Length,[ref]$w)){throw 'write code failed'}
+              $tid=0; $th=[R41]::CreateRemoteThread($h,[IntPtr]::Zero,0,[IntPtr]::new([long]$code),[IntPtr]::Zero,0,[ref]$tid)
+              if($th-eq[IntPtr]::Zero){throw 'CreateRemoteThread failed'}
+              try {if([R41]::WaitForSingleObject($th,10000)-ne0){throw 'remote timeout'}} finally {[R41]::CloseHandle($th)|Out-Null}
+              $o=New-Object byte[] 16; $r=[IntPtr]::Zero
+              if(-not[R41]::ReadProcessMemory($h,[IntPtr]::new([long]$clsout),$o,16,[ref]$r)){throw 'read result failed'}
+              return @([BitConverter]::ToInt32($o,0),[BitConverter]::ToDouble($o,8))
+            } finally {[R41]::VirtualFreeEx($h,$mem,0,0x8000)|Out-Null}
+          }
+          function B(){ return ,(New-Object int[] 26) }
+          $cases=@()
+          $b=B; $b[1]=15; $cases+=,@('C0_ONE_SIDE',$b)
+          $b=B; $b[1]=6; $b[24]=-6; $cases+=,@('C1_SMALL_BEAROFF',$b)
+          $cases+=,@('C2_FULL_BEAROFF',@(0,3,3,3,3,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-3,-3,-3,-3,-3,0))
+          $b=B; $b[7]=15; $b[18]=-15; $cases+=,@('C3_RACE_OUTSIDE_HOME',$b)
+          $cases+=,@('C4_START',@(0,2,0,0,0,0,-5,0,-3,0,0,0,5,-5,0,0,0,3,0,5,0,0,0,0,-2,0))
+          $b=B; $b[13]=6; $b[12]=-15; $cases+=,@('C5_CRASHED',$b)
+          $b=B; $b[13]=15; $b[12]=-15; $cases+=,@('C6_BACK_SUM_24',$b)
+          $b=B; $b[20]=7; $b[24]=8; $b[22]=-15; $cases+=,@('C7_DEEP_CONTACT',$b)
+          $proc=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+          $h=[R41]::OpenProcess(0x1F0FFF,$false,$proc.Id); if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
+          $lines=New-Object 'System.Collections.Generic.List[string]'
+          $lines.Add("name`tflag`txg_class`txg_eff`tboard")
+          try {
+            foreach($c in $cases){
+              foreach($flag in @(0,1)){
+                $r=RunCase $h $c[1] ([byte]$flag)
+                $line="$($c[0])`t$flag`t$($r[0])`t$([double]$r[1])`t$([string]::Join(',', $c[1]))"
+                $lines.Add($line); Write-Host $line
+              }
+            }
+          } finally {[R41]::CloseHandle($h)|Out-Null}
+          [IO.File]::WriteAllLines((Join-Path $PWD 'r41-xg-dispatcher.tsv'),$lines,[Text.UTF8Encoding]::new($false))
+
+      - name: Crosscheck portable classifier and dispatcher
+        shell: powershell
+        run: |
+          @'
+          import csv, importlib.util, pathlib, sys
+          def load(name,path):
+              spec=importlib.util.spec_from_file_location(name,path)
+              m=importlib.util.module_from_spec(spec); sys.modules[name]=m; spec.loader.exec_module(m); return m
+          c=load('r39c',pathlib.Path('scripts/r39-portable-xg-raw-classifier.py'))
+          e=load('r38e',pathlib.Path('scripts/r38-portable-xg-cube-efficiency.py'))
+          ok=0; max_err=0.0
+          with open('r41-xg-dispatcher.tsv',encoding='utf-8',newline='') as f:
+              rows=list(csv.DictReader(f,delimiter='\t'))
+          for r in rows:
+              board=[int(x) for x in r['board'].split(',')]
+              flag=bool(int(r['flag']))
+              xg_class=int(r['xg_class']); xg_eff=float(r['xg_eff'])
+              portable_class=c.classify_raw(board)
+              portable_eff=e.cube_efficiency(board,portable_class,side=1,flag=flag,state20=-1,state24=-1)
+              err=abs(portable_eff-xg_eff); max_err=max(max_err,err)
+              print(f"{r['name']} flag={int(flag)} class xg={xg_class} portable={portable_class} eff xg={xg_eff:.15g} portable={portable_eff:.15g} err={err:.3g}")
+              if portable_class != xg_class or err > 5e-7:
+                  raise SystemExit(f"MISMATCH {r['name']} flag={int(flag)}")
+              ok += 1
+          print(f'R41_XG_DISPATCHER_END_TO_END=PASS cases={ok} max_err={max_err:.9g}')
+          '@ | Set-Content ./r41-compare.py -Encoding utf8
+          python ./r41-compare.py
+
+      - name: Upload R41 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r41-xg-dispatcher-end-to-end
+          path: r41-xg-dispatcher.tsv
+          if-no-files-found: ignore
+          retention-days: 14

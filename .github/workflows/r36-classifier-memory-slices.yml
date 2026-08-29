@@ -1,0 +1,70 @@
+name: R36.30 XG Class3 Efficiency Helpers
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths: [.github/workflows/r36-classifier-memory-slices.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install eXtreme Gammon
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+      - name: Reach proven ready XG instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+      - name: Dump class3 helper bodies
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Mem {
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint a,bool i,int pid);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool ReadProcessMemory(IntPtr h,IntPtr a,byte[] b,int s,out IntPtr r);
+            [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+          }
+          '@
+          $proc=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          $h=[Mem]::OpenProcess(0x0010 -bor 0x0400,$false,$proc.Id)
+          if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
+          function Dump([long]$va,[int]$len,[string]$name){
+            $b=New-Object byte[] $len; $r=[IntPtr]::Zero
+            if(-not [Mem]::ReadProcessMemory($h,[IntPtr]::new($va),$b,$len,[ref]$r)){throw "read failed 0x$($va.ToString('x'))"}
+            if($r.ToInt64()-ne$len){throw "short read 0x$($va.ToString('x'))"}
+            [IO.File]::WriteAllBytes((Join-Path $PWD $name),$b)
+          }
+          try {
+            Dump 0x009D7800 0x1000 'class3_helper_9d7800.bin'
+            Dump 0x00463800 0x0800 'class3_helper_463800.bin'
+            'R36_CLASS3_HELPERS=PASS' | Tee-Object -FilePath ./r36-class3-helper-summary.txt
+          } finally {[Mem]::CloseHandle($h)|Out-Null}
+      - name: Upload class3 helpers
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r36-xg-class3-efficiency-helpers
+          path: |
+            class3_helper_9d7800.bin
+            class3_helper_463800.bin
+            r36-class3-helper-summary.txt
+            r35-proven-startup-summary.txt
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,128 @@
+name: R40 XG Raw Classifier Crosscheck
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r40-xg-classifier-crosscheck.yml
+      - scripts/r39-portable-xg-raw-classifier.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crosscheck:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install eXtreme Gammon
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+      - name: Reach proven ready XG instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+      - name: Query internal XG classifier corpus
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class R40 {
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint a,bool i,int pid);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr VirtualAllocEx(IntPtr h,IntPtr a,uint s,uint t,uint p);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool VirtualFreeEx(IntPtr h,IntPtr a,uint s,uint t);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool WriteProcessMemory(IntPtr h,IntPtr a,byte[] b,int s,out IntPtr w);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool ReadProcessMemory(IntPtr h,IntPtr a,byte[] b,int s,out IntPtr r);
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr CreateRemoteThread(IntPtr h,IntPtr sa,uint ss,IntPtr start,IntPtr par,uint f,out uint tid);
+            [DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr h,uint ms);
+            [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+          }
+          '@
+          function I32([int]$x){ return ,([byte[]][BitConverter]::GetBytes($x)) }
+          function U32([uint32]$x){ return ,([byte[]][BitConverter]::GetBytes($x)) }
+          function XGClass($h,[int[]]$p){
+            if($p.Count-ne26){throw 'board width'}
+            $mem=[R40]::VirtualAllocEx($h,[IntPtr]::Zero,0x1000,0x3000,0x40)
+            if($mem-eq[IntPtr]::Zero){throw 'VirtualAllocEx failed'}
+            try {
+              $base=[uint32]$mem.ToInt64(); $state=$base; $clsout=$base+0x100; $code=$base+0x200
+              $st=New-Object byte[] 0x60
+              for($i=0;$i-lt26;$i++){$st[$i]=[byte]($p[$i] -band 0xff)}
+              $w=[IntPtr]::Zero
+              if(-not[R40]::WriteProcessMemory($h,[IntPtr]::new([long]$state),$st,$st.Length,[ref]$w)){throw 'write state failed'}
+              $c=New-Object 'System.Collections.Generic.List[byte]'
+              $c.Add(0xB8); $c.AddRange((U32 $state))
+              $src=$code+[uint32]$c.Count; $rel=[int](0x006F9580L-([long]$src+5)); $c.Add(0xE8); $c.AddRange((I32 $rel))
+              $c.Add(0xA3); $c.AddRange((U32 $clsout)); $c.Add(0xC3)
+              $cb=$c.ToArray()
+              if(-not[R40]::WriteProcessMemory($h,[IntPtr]::new([long]$code),$cb,$cb.Length,[ref]$w)){throw 'write code failed'}
+              $tid=0; $th=[R40]::CreateRemoteThread($h,[IntPtr]::Zero,0,[IntPtr]::new([long]$code),[IntPtr]::Zero,0,[ref]$tid)
+              if($th-eq[IntPtr]::Zero){throw 'CreateRemoteThread failed'}
+              try {if([R40]::WaitForSingleObject($th,10000)-ne0){throw 'remote timeout'}} finally {[R40]::CloseHandle($th)|Out-Null}
+              $o=New-Object byte[] 4; $r=[IntPtr]::Zero
+              if(-not[R40]::ReadProcessMemory($h,[IntPtr]::new([long]$clsout),$o,4,[ref]$r)){throw 'read class failed'}
+              return [BitConverter]::ToInt32($o,0)
+            } finally {[R40]::VirtualFreeEx($h,$mem,0,0x8000)|Out-Null}
+          }
+          function B(){ return ,(New-Object int[] 26) }
+          $cases=@()
+          $b=B; $b[1]=15; $cases+=,@('C0_ONE_SIDE',$b,0)
+          $b=B; $b[1]=6; $b[24]=-6; $cases+=,@('C1_SMALL_BEAROFF',$b,1)
+          $b=@(0,3,3,3,3,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,-3,-3,-3,-3,-3,0); $cases+=,@('C2_FULL_BEAROFF',$b,2)
+          $b=B; $b[7]=15; $b[18]=-15; $cases+=,@('C3_RACE_OUTSIDE_HOME',$b,3)
+          $b=@(0,2,0,0,0,0,-5,0,-3,0,0,0,5,-5,0,0,0,3,0,5,0,0,0,0,-2,0); $cases+=,@('C4_START',$b,4)
+          $b=B; $b[13]=6; $b[12]=-15; $cases+=,@('C5_CRASHED',$b,5)
+          $b=B; $b[13]=15; $b[12]=-15; $cases+=,@('C6_BACK_SUM_24',$b,6)
+          $b=B; $b[20]=7; $b[24]=8; $b[22]=-15; $cases+=,@('C7_DEEP_CONTACT',$b,7)
+          $proc=Get-Process eXtremeGammon2 -ErrorAction Stop|Select-Object -First 1
+          $h=[R40]::OpenProcess(0x1F0FFF,$false,$proc.Id); if($h-eq[IntPtr]::Zero){throw 'OpenProcess failed'}
+          try {
+            "name`texpected`txg`tboard" | Out-File ./r40-xg-classes.tsv -Encoding ascii
+            foreach($c in $cases){
+              $got=XGClass $h $c[1]
+              "$($c[0])`t$($c[2])`t$got`t$([string]::Join(',', $c[1]))" | Tee-Object -FilePath ./r40-xg-classes.tsv -Append
+            }
+          } finally {[R40]::CloseHandle($h)|Out-Null}
+      - name: Crosscheck portable classifier
+        shell: powershell
+        run: |
+          @'
+          import csv, importlib.util, pathlib, sys
+          p=pathlib.Path('scripts/r39-portable-xg-raw-classifier.py')
+          spec=importlib.util.spec_from_file_location('r39c',p)
+          m=importlib.util.module_from_spec(spec)
+          sys.modules[spec.name]=m
+          spec.loader.exec_module(m)
+          ok=0
+          with open('r40-xg-classes.tsv',encoding='ascii') as f:
+              rows=list(csv.DictReader(f,delimiter='\t'))
+          for r in rows:
+              board=[int(x) for x in r['board'].split(',')]
+              portable=m.classify_raw(board)
+              xg=int(r['xg']); expected=int(r['expected'])
+              print(f"{r['name']} expected={expected} xg={xg} portable={portable}")
+              if xg != expected or portable != xg:
+                  raise SystemExit(f"MISMATCH {r['name']}")
+              ok += 1
+          print(f'R40_XG_RAW_CLASSIFIER_CROSSCHECK=PASS cases={ok}')
+          '@ | Set-Content ./r40-compare.py -Encoding utf8
+          python ./r40-compare.py
+      - name: Upload crosscheck evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r40-xg-raw-classifier-crosscheck
+          path: r40-xg-classes.tsv
+          if-no-files-found: ignore
+          retention-days: 14

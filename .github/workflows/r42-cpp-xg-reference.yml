@@ -1,0 +1,27 @@
+name: R42-R43 C++ XG Reference and BG1 Adapter
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - reference/xg_cube_reference.cpp
+      - reference/bg1_xg_state_adapter_reference.cpp
+      - .github/workflows/r42-cpp-xg-reference.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build XG reference
+        run: g++ -std=c++17 -O2 -Wall -Wextra -pedantic reference/xg_cube_reference.cpp -o /tmp/xg_cube_reference
+      - name: Run XG reference selftest
+        run: /tmp/xg_cube_reference
+      - name: Build BG1 adapter reference
+        run: g++ -std=c++17 -O2 -Wall -Wextra -pedantic reference/bg1_xg_state_adapter_reference.cpp -o /tmp/bg1_xg_adapter
+      - name: Run BG1 adapter selftest
+        run: /tmp/bg1_xg_adapter

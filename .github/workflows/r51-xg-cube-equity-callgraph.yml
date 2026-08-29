@@ -1,0 +1,65 @@
+name: R51 XG Cube Equity Call Graph
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r51-xg-cube-equity-callgraph.yml
+      - scripts/r51-xg-cube-equity-callgraph.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  callgraph:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Install disassembler
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --upgrade pip
+          python -m pip install capstone
+
+      - name: Reach proven ready unpacked XG2 instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
+      - name: Recover cube equity call graph from live unpacked image
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          python ./scripts/r51-xg-cube-equity-callgraph.py --pid $xg.Id --outdir ./r51-callgraph
+          Get-Content ./r51-callgraph/r51-summary.txt
+          Get-Content ./r51-callgraph/r51-call-xrefs.tsv
+
+      - name: Upload R51 reverse-engineering evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r51-xg-cube-equity-callgraph
+          path: |
+            r51-callgraph/*
+            r35-proven-startup-report.txt
+            r35-proven-startup-summary.txt
+          if-no-files-found: warn
+          retention-days: 14

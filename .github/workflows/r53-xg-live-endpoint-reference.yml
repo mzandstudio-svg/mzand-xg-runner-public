@@ -1,0 +1,22 @@
+name: R53 XG Live Endpoint Reference
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - reference/xg_live_endpoint_reference.cpp
+      - .github/workflows/r53-xg-live-endpoint-reference.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build recovered live endpoint reference
+        run: g++ -std=c++17 -O2 -Wall -Wextra -pedantic reference/xg_live_endpoint_reference.cpp -o /tmp/xg_live_endpoint_reference
+      - name: Run recovered live endpoint selftest
+        run: /tmp/xg_live_endpoint_reference

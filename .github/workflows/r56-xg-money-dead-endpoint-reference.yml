@@ -1,0 +1,22 @@
+name: R56 XG Money Dead Endpoint Reference
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - reference/xg_money_dead_endpoint_reference.cpp
+      - .github/workflows/r56-xg-money-dead-endpoint-reference.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build recovered money dead endpoint reference
+        run: g++ -std=c++17 -O2 -Wall -Wextra -pedantic reference/xg_money_dead_endpoint_reference.cpp -o /tmp/xg_money_dead_endpoint_reference
+      - name: Run recovered money dead endpoint selftest
+        run: /tmp/xg_money_dead_endpoint_reference

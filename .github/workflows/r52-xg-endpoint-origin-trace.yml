@@ -1,0 +1,65 @@
+name: R52 XG Endpoint Origin Trace
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r52-xg-endpoint-origin-trace.yml
+      - scripts/r52-xg-endpoint-origin-trace.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  endpoint-origin:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Install reverse-engineering dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python -m pip install --upgrade pip
+          python -m pip install capstone pyautogui pywinauto
+
+      - name: Reach proven ready unpacked XG2 instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
+      - name: Trace exact live/dead endpoint origins
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          python ./scripts/r52-xg-endpoint-origin-trace.py --pid $xg.Id --outdir ./r52-endpoint-origin
+          Get-Content ./r52-endpoint-origin/r52-summary.txt
+          Get-Content ./r52-endpoint-origin/r52-live-endpoint-origin-trace.txt
+
+      - name: Upload R52 reverse-engineering evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r52-xg-endpoint-origin-trace
+          path: |
+            r52-endpoint-origin/*
+            r35-proven-startup-report.txt
+            r35-proven-startup-summary.txt
+          if-no-files-found: warn
+          retention-days: 14

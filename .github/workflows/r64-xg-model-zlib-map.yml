@@ -1,0 +1,50 @@
+name: R64 XG Model Zlib Map
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r64-xg-model-zlib-map.yml
+      - scripts/r64-xg-model-zlib-map.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  map:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Map zlib streams and historical decoded payload
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python ./scripts/r64-xg-model-zlib-map.py --xg-exe "$env:XG_EXE" --outdir ./r64-zlib-map
+          Get-Content ./r64-zlib-map/r64-summary.txt
+          Get-Content ./r64-zlib-map/r64-stream-map.tsv
+          Get-Content ./r64-zlib-map/r64-known-pair-hits.tsv
+          Get-ChildItem ./r64-zlib-map/r64-stream-*-tensor-starts.tsv -ErrorAction SilentlyContinue | ForEach-Object { Get-Content $_.FullName }
+
+      - name: Upload R64 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r64-xg-model-zlib-map
+          path: r64-zlib-map/*
+          if-no-files-found: warn
+          retention-days: 14

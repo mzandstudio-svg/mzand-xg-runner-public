@@ -1,0 +1,105 @@
+name: R74 XG Checker Depth Matrix
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r74-xg-checker-depth-matrix.yml
+      - scripts/r74-xg-checker-depth-keyboard-oracle.py
+      - scripts/r74-xg-checker-depth-one.py
+      - scripts/r35-xg-1ply-oracle.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - level: 0
+            label: 1-ply
+          - level: 1
+            label: 2-ply
+          - level: 2
+            label: 3-ply
+          - level: 3
+            label: 4-ply
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official eXtreme Gammon
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE "r74-xg-install-${{ matrix.level }}.log"
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+          Get-FileHash -Algorithm SHA256 $exe
+
+      - name: Install XG automation
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ag=Join-Path $env:RUNNER_TEMP 'AnkiGammon'
+          git clone --depth 1 https://github.com/Deinonychus999/AnkiGammon.git $ag
+          python -m pip install -e $ag
+          python -m pip install pywinauto pyautogui pymem
+
+      - name: Capture ${{ matrix.label }}
+        shell: powershell
+        env:
+          R74_ONLY_LEVEL: ${{ matrix.level }}
+        run: |
+          $ErrorActionPreference='Continue'
+          $out="R74-XG-DEPTH-${{ matrix.level }}.tsv"
+          $xgp="r74-xgp-${{ matrix.level }}"
+          python ./scripts/r74-xg-checker-depth-one.py `
+            --output $out `
+            --xgp-dir $xgp `
+            *> "r74-console-${{ matrix.level }}.txt"
+          $rc=$LASTEXITCODE
+          Get-Content "r74-console-${{ matrix.level }}.txt"
+          if(Test-Path "R74-XG-DEPTH-${{ matrix.level }}.summary.txt"){
+            Get-Content "R74-XG-DEPTH-${{ matrix.level }}.summary.txt"
+          }
+          if($rc-ne0){throw "R74 ${{ matrix.label }} failed rc=$rc"}
+
+      - name: Validate binary level ${{ matrix.level }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $rows=Import-Csv "R74-XG-DEPTH-${{ matrix.level }}.tsv" -Delimiter "`t"
+          if($rows.Count-eq0){throw 'No rows captured'}
+          $levels=@($rows.binary_level|ForEach-Object {[int]$_}|Sort-Object -Unique)
+          if($levels -notcontains [int]${{ matrix.level }}){
+            throw "Requested level ${{ matrix.level }} missing from $($levels -join ',')"
+          }
+          $choice=@($rows|Where-Object {$_.is_choice0-eq'1'})
+          $choiceLevel=if($choice.Count){$choice[0].binary_level}else{'NONE'}
+          Write-Host "R74_MATRIX_PASS requested=${{ matrix.level }} binary=$($levels -join ',') choiceLevel=$choiceLevel rows=$($rows.Count)"
+
+      - name: Upload ${{ matrix.label }} evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r74-xg-depth-${{ matrix.level }}
+          path: |
+            R74-XG-DEPTH-${{ matrix.level }}.tsv
+            R74-XG-DEPTH-${{ matrix.level }}.summary.txt
+            r74-console-${{ matrix.level }}.txt
+            r74-xg-install-${{ matrix.level }}.log
+            r74-xgp-${{ matrix.level }}/*.xgp
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,73 @@
+name: R57 XG Cube Driver Entry Trace
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r57-xg-cube-driver-entry-trace.yml
+      - scripts/r57-xg-cube-driver-entry-trace.py
+      - scripts/r52b-send-analyze-double.py
+      - scripts/r52d-send-analyze-position.py
+      - scripts/xg-reach-xgid.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  broad-entry-trace:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Reach proven known XGID position
+        shell: powershell
+        run: ./scripts/xg-reach-xgid.ps1
+
+      - name: Trace broad cube-driver entry and trigger both analysis commands
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          $out=Join-Path $env:GITHUB_WORKSPACE 'r57-trace-stdout.txt'
+          $err=Join-Path $env:GITHUB_WORKSPACE 'r57-trace-stderr.txt'
+          $args=@('./scripts/r57-xg-cube-driver-entry-trace.py','--pid',"$($xg.Id)",'--out','./r57-cube-driver-entry-trace.txt','--seconds','50')
+          $p=Start-Process python -ArgumentList $args -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
+          Start-Sleep -Seconds 3
+          python ./scripts/r52b-send-analyze-double.py $xg.Id
+          Start-Sleep -Seconds 4
+          python ./scripts/r52d-send-analyze-position.py $xg.Id
+          try { Wait-Process -Id $p.Id -Timeout 70 -ErrorAction Stop }
+          catch { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue; throw 'R57 trace watchdog timeout' }
+          $p.Refresh()
+          if(Test-Path $out){Get-Content $out}
+          if(Test-Path $err){Get-Content $err}
+          if(Test-Path './r57-cube-driver-entry-trace.txt'){Get-Content './r57-cube-driver-entry-trace.txt'}
+          if($p.ExitCode-ne0){throw "R57 broad trace failed rc=$($p.ExitCode)"}
+
+      - name: Upload R57 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r57-xg-cube-driver-entry-trace
+          path: |
+            r57-cube-driver-entry-trace.txt
+            r57-trace-stdout.txt
+            r57-trace-stderr.txt
+            xg-reach-xgid-report.txt
+          if-no-files-found: warn
+          retention-days: 14
