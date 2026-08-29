@@ -7,6 +7,7 @@ on:
       - .github/workflows/r59-xg-network-access-trace.yml
       - scripts/r59-prepare-checker-xgid.py
       - scripts/r59-xg-network-access-trace.py
+      - scripts/r59b-xg-network-access-trace-abi.py
       - scripts/r35-proven-startup.ps1
   workflow_dispatch:
 
@@ -59,7 +60,7 @@ jobs:
           $out=Join-Path $env:GITHUB_WORKSPACE 'r59-network-stdout.txt'
           $err=Join-Path $env:GITHUB_WORKSPACE 'r59-network-stderr.txt'
           $args=@(
-            './scripts/r59-xg-network-access-trace.py',
+            './scripts/r59b-xg-network-access-trace-abi.py',
             '--pid', "$($xg.Id)",
             '--xg-exe', "$env:XG_EXE",
             '--outdir', './r59-network-trace',
