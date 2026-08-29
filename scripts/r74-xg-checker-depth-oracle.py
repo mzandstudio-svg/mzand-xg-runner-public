@@ -6,7 +6,7 @@ import csv
 import ctypes
 import importlib.util
 import os
-import struct
+import re
 import sys
 import time
 from pathlib import Path
@@ -14,17 +14,12 @@ from pathlib import Path
 if sys.platform != "win32":
     raise SystemExit("R74 requires Windows Python")
 
-import pefile
 from ankigammon.utils.xg_auto.automator import XGAutomator
 from ankigammon.thirdparty.xgdatatools import xgimport, xgstruct
 
 user32 = ctypes.windll.user32
 WM_COMMAND = 0x0111
-RT_ACCELERATOR = 9
-FVIRTKEY = 0x01
-FSHIFT = 0x04
-FCONTROL = 0x08
-FALT = 0x10
+MF_BYPOSITION = 0x0400
 
 DEFAULT_XGID = "XGID=---BBBBAAA---Ac-bbccbAA-A-:1:1:-1:63:4:3:0:5:8"
 LEVELS = [
@@ -103,62 +98,107 @@ def move_text(raw) -> str:
     return " ".join(parts)
 
 
-def accelerator_commands(exe: Path) -> dict[int, int]:
-    """Recover XG Ctrl+1..4 WM_COMMAND IDs from its PE accelerator table."""
-    pe = pefile.PE(str(exe), fast_load=False)
-    pe.parse_data_directories(
-        directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"]]
-    )
-    root = getattr(pe, "DIRECTORY_ENTRY_RESOURCE", None)
-    if root is None:
-        raise RuntimeError("official XG EXE has no resource directory")
+def _menu_text(hmenu: int, pos: int) -> str:
+    n = int(user32.GetMenuStringW(hmenu, pos, None, 0, MF_BYPOSITION))
+    if n <= 0:
+        return ""
+    buf = ctypes.create_unicode_buffer(n + 2)
+    user32.GetMenuStringW(hmenu, pos, buf, len(buf), MF_BYPOSITION)
+    return buf.value
 
-    tables = []
-    for typ in root.entries:
-        if typ.id != RT_ACCELERATOR or not hasattr(typ, "directory"):
-            continue
-        for name in typ.directory.entries:
-            if not hasattr(name, "directory"):
-                continue
-            for lang in name.directory.entries:
-                data = lang.data.struct
-                blob = pe.get_data(data.OffsetToData, data.Size)
-                mapping: dict[int, int] = {}
-                for off in range(0, len(blob) - 7, 8):
-                    flags, key, cmd, _padding = struct.unpack_from("<HHHH", blob, off)
-                    pure_ctrl = (
-                        bool(flags & FCONTROL)
-                        and not bool(flags & FALT)
-                        and not bool(flags & FSHIFT)
-                    )
-                    if pure_ctrl and bool(flags & FVIRTKEY) and key in map(ord, "1234"):
-                        mapping[key - ord("0")] = cmd
-                tables.append((name.id, lang.id, mapping))
 
-    viable = [t for t in tables if set(t[2]) == {1, 2, 3, 4}]
-    if not viable:
-        for rid, lid, mapping in tables:
+def enumerate_menu(hwnd: int) -> list[dict]:
+    root = int(user32.GetMenu(hwnd) or 0)
+    if not root:
+        raise RuntimeError("XG main window has no native HMENU")
+
+    out: list[dict] = []
+
+    def walk(hmenu: int, prefix: list[str]) -> None:
+        count = int(user32.GetMenuItemCount(hmenu))
+        for pos in range(max(0, count)):
+            text = _menu_text(hmenu, pos)
+            clean = text.replace("&", "").strip()
+            submenu = int(user32.GetSubMenu(hmenu, pos) or 0)
+            item_id = int(user32.GetMenuItemID(hmenu, pos))
+            path = prefix + ([clean] if clean else [f"#{pos}"])
+            row = {
+                "path": " > ".join(path),
+                "text": text,
+                "clean": clean,
+                "id": item_id,
+                "submenu": bool(submenu),
+            }
+            out.append(row)
+            if submenu:
+                walk(submenu, path)
+
+    walk(root, [])
+    for r in out:
+        lo = r["clean"].lower()
+        if "ply" in lo or "roller" in lo or "analy" in lo or "ctrl+" in lo:
             print(
-                f"R74_ACCEL_TABLE resource={rid} lang={lid} map={mapping}",
+                f"R74_MENU id={r['id']} submenu={int(r['submenu'])} path={r['path']!r}",
                 flush=True,
             )
-        raise RuntimeError("no accelerator table contains Ctrl+1..4")
+    return out
 
-    rid, lid, mapping = viable[0]
-    print(f"R74_ACCEL_TABLE_SELECTED resource={rid} lang={lid}", flush=True)
+
+def discover_ply_commands(hwnd: int) -> dict[int, int]:
+    rows = enumerate_menu(hwnd)
+    mapping: dict[int, int] = {}
+
     for digit in range(1, 5):
-        print(f"R74_ACCEL_CTRL{digit}_CMD={mapping[digit]}", flush=True)
+        candidates = []
+        for r in rows:
+            if r["submenu"] or r["id"] < 0:
+                continue
+            s = r["clean"].lower()
+            compact = re.sub(r"[^a-z0-9+]", "", s)
+            ply_match = (
+                f"{digit}ply" in compact
+                or bool(re.search(rf"(^|\D){digit}\s*-?\s*ply(\D|$)", s))
+            )
+            shortcut_match = f"ctrl+{digit}" in compact
+            if ply_match or shortcut_match:
+                score = 0
+                if ply_match:
+                    score += 10
+                if shortcut_match:
+                    score += 20
+                if "eval" in s or "analy" in s:
+                    score += 5
+                candidates.append((score, r))
+
+        candidates.sort(key=lambda x: (-x[0], x[1]["path"]))
+        if not candidates:
+            raise RuntimeError(f"no live XG menu command found for {digit}-ply")
+
+        best_score = candidates[0][0]
+        best = [r for score, r in candidates if score == best_score]
+        ids = sorted({int(r["id"]) for r in best})
+        if len(ids) != 1:
+            detail = [(r["id"], r["path"]) for r in best]
+            raise RuntimeError(f"ambiguous {digit}-ply live menu commands: {detail}")
+
+        mapping[digit] = ids[0]
+        chosen = next(r for r in best if int(r["id"]) == ids[0])
+        print(
+            f"R74_LIVE_CTRL{digit}_CMD={ids[0]} path={chosen['path']!r}",
+            flush=True,
+        )
+
+    if len(set(mapping.values())) != 4:
+        raise RuntimeError(f"non-unique live ply command mapping: {mapping}")
     return mapping
 
 
-def send_accelerator_command(hwnd: int, cmd: int, digit: int) -> None:
-    # TranslateAccelerator posts WM_COMMAND with HIWORD(wParam)=1.
-    wparam = (1 << 16) | (cmd & 0xFFFF)
-    ok = user32.PostMessageW(hwnd, WM_COMMAND, wparam, 0)
-    if not ok:
-        raise RuntimeError(f"PostMessage Ctrl+{digit} command failed")
+def send_menu_command(hwnd: int, cmd: int, digit: int) -> None:
+    # Native menu invocation: HIWORD(wParam)=0. This reaches the same TMenuItem
+    # OnClick handler as the Ctrl+digit shortcut, without keyboard focus.
+    result = user32.SendMessageW(hwnd, WM_COMMAND, cmd & 0xFFFF, 0)
     print(
-        f"R74_ACCEL_COMMAND_SENT ctrl={digit} cmd={cmd} wparam=0x{wparam:08X}",
+        f"R74_MENU_COMMAND_SENT ctrl={digit} cmd={cmd} result={int(result)}",
         flush=True,
     )
 
@@ -179,7 +219,7 @@ def analyze_level(
     auto.send_command(auto.cmd.CLEAR_ANALYZE)
     time.sleep(0.6)
 
-    send_accelerator_command(int(auto._hwnd), cmd, digit)
+    send_menu_command(int(auto._hwnd), cmd, digit)
     print(f"R74_EVAL_WAIT label={label} seconds={wait_s}", flush=True)
 
     deadline = time.time() + wait_s
@@ -193,9 +233,6 @@ def analyze_level(
     helpers.export_xgp(auto, out_xgp)
     result = extract_move_analysis(out_xgp)
     levels = sorted({r["level"] for r in result["rows"]})
-
-    # XG's search interval can leave lower-ranked candidates at shallower levels.
-    # The requested target must nevertheless appear in the exported binary data.
     if target not in levels:
         raise RuntimeError(
             f"{label} binary levels {levels} do not contain requested {target}"
@@ -214,12 +251,12 @@ def main() -> int:
     if not exe.exists():
         raise SystemExit(f"XG executable missing: {exe}")
 
-    commands = accelerator_commands(exe)
     helpers = load_r35_helpers()
     auto = XGAutomator(xg_path=exe, headless=True, poll_interval=0.25, timeout=60.0)
     auto.connect()
     records = []
     try:
+        commands = discover_ply_commands(int(auto._hwnd))
         for label, target, digit, wait_s in LEVELS:
             out_xgp = (a.xgp_dir / f"r74-{target}-{label}.xgp").resolve()
             out_xgp.parent.mkdir(parents=True, exist_ok=True)
@@ -252,8 +289,7 @@ def main() -> int:
                 records.append({
                     "requested_label": label,
                     "requested_level": target,
-                    "accelerator_digit": digit,
-                    "accelerator_command": commands[digit],
+                    "menu_command": commands[digit],
                     "rank_slot": r["slot"],
                     "is_choice0": int(r["slot"] == result["choice0"]),
                     "binary_level": r["level"],
@@ -288,7 +324,7 @@ def main() -> int:
         choice = [r for r in subset if int(r["is_choice0"]) == 1]
         choice_level = int(choice[0]["binary_level"]) if choice else -999
         summary.append(
-            f"{label}\trequested={target}\tctrl={digit}\tcmd={commands[digit]}"
+            f"{label}\trequested={target}\tcmd={commands[digit]}"
             f"\tbinary_levels={','.join(map(str,binary))}"
             f"\tchoice_level={choice_level}\trows={len(subset)}"
         )
