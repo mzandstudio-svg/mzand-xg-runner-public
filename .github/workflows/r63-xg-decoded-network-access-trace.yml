@@ -1,0 +1,84 @@
+name: R63 XG Decoded Network Access Trace
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r63-xg-decoded-network-access-trace.yml
+      - scripts/r63-xg-decoded-network-access-trace.py
+      - scripts/r59-xg-network-access-trace.py
+      - scripts/r59-prepare-checker-xgid.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Install reverse-engineering dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ag=Join-Path $env:RUNNER_TEMP 'AnkiGammon'
+          git clone --depth 1 https://github.com/Deinonychus999/AnkiGammon.git $ag
+          python -m pip install --upgrade pip
+          python -m pip install -e $ag
+          python -m pip install capstone pywinauto pyautogui pymem
+
+      - name: Reach proven unpacked XG2 instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
+      - name: Load deterministic checker-analysis position
+        shell: powershell
+        run: python ./scripts/r59-prepare-checker-xgid.py
+
+      - name: Trace reads from decoded native tensor starts
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          New-Item -ItemType Directory -Force ./r63-network-trace | Out-Null
+          python ./scripts/r63-xg-decoded-network-access-trace.py `
+            --pid $xg.Id `
+            --xg-exe "$env:XG_EXE" `
+            --outdir ./r63-network-trace `
+            --seconds 55 `
+            --max-hits 48 2>&1 | Tee-Object -FilePath ./r63-network-console.txt
+          $rc=$LASTEXITCODE
+          "R63_TRACE_RC=$rc" | Out-File ./r63-network-trace/r63-run-result.txt
+          if(Test-Path './r63-network-trace/r59-summary.txt'){Get-Content './r63-network-trace/r59-summary.txt'}
+          if(Test-Path './r63-network-trace/r59-hits.tsv'){Get-Content './r63-network-trace/r59-hits.tsv'}
+          if($rc-ne0){throw "R63 trace failed rc=$rc"}
+
+      - name: Upload R63 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r63-xg-decoded-network-access-trace
+          path: |
+            r63-network-trace/*
+            r63-network-console.txt
+            r35-proven-startup-summary.txt
+            r35-proven-startup-report.txt
+          if-no-files-found: warn
+          retention-days: 14
