@@ -1,0 +1,95 @@
+name: R74 XG Checker Depth Oracle
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r74-xg-checker-depth-oracle.yml
+      - scripts/r74-xg-checker-depth-oracle.py
+      - scripts/r35-xg-1ply-oracle.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install eXtreme Gammon from official installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $log=Join-Path $env:GITHUB_WORKSPACE 'r74-xg-install.log'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/LOG=$log") -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+          Get-FileHash -Algorithm SHA256 $exe
+
+      - name: Prepare Python XG automation parser
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ag=Join-Path $env:RUNNER_TEMP 'AnkiGammon'
+          git clone --depth 1 https://github.com/Deinonychus999/AnkiGammon.git $ag
+          python -m pip install --upgrade pip
+          python -m pip install -e $ag
+          python -m pip install pywinauto pyautogui pymem
+
+      - name: Reach proven ready XG instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
+      - name: Capture official XG 1-4 ply checker oracle
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Continue'
+          python ./scripts/r74-xg-checker-depth-oracle.py `
+            --output ./R74-XG-CHECKER-DEPTH-ORACLE.tsv `
+            --xgp-dir ./r74-xgp `
+            *> ./r74-console.txt
+          $rc=$LASTEXITCODE
+          Get-Content ./r74-console.txt
+          if(Test-Path ./R74-XG-CHECKER-DEPTH-ORACLE.summary.txt){
+            Get-Content ./R74-XG-CHECKER-DEPTH-ORACLE.summary.txt
+          }
+          if($rc-ne0){throw "R74 oracle failed rc=$rc"}
+
+      - name: Validate capture has all requested modes
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $rows=Import-Csv ./R74-XG-CHECKER-DEPTH-ORACLE.tsv -Delimiter "`t"
+          foreach($level in 0,1,2,3){
+            $r=@($rows|Where-Object {[int]$_.requested_level-eq$level})
+            if($r.Count-eq0){throw "Missing requested level $level"}
+            $levels=@($r.binary_level|Sort-Object -Unique)
+            Write-Host "R74_LEVEL requested=$level binary=$($levels -join ',') rows=$($r.Count)"
+          }
+          Write-Host 'R74_XG_CHECKER_DEPTH_CAPTURE=PASS'
+
+      - name: Upload R74 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r74-xg-checker-depth-oracle
+          path: |
+            R74-XG-CHECKER-DEPTH-ORACLE.tsv
+            R74-XG-CHECKER-DEPTH-ORACLE.summary.txt
+            r74-console.txt
+            r74-xg-install.log
+            r35-proven-startup-report.txt
+            r35-proven-startup-summary.txt
+            r74-xgp/*.xgp
+          if-no-files-found: ignore
+          retention-days: 14
