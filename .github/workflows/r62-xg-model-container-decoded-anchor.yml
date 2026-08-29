@@ -1,0 +1,57 @@
+name: R62 XG Model Container Decoded Anchor
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r62-xg-model-container-decoded-anchor.yml
+      - scripts/r62-xg-model-container-decoded-anchor.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+      - name: Reach proven unpacked XG2 instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+      - name: Inspect official model container and decoded RAM anchor
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          python ./scripts/r62-xg-model-container-decoded-anchor.py `
+            --pid $xg.Id `
+            --xg-exe "$env:XG_EXE" `
+            --outdir ./r62-model-anchor
+          Get-Content ./r62-model-anchor/r62-summary.txt
+          Get-Content ./r62-model-anchor/r62-decoded-anchor-matches.tsv
+          Get-Content ./r62-model-anchor/r62-container-report.tsv | Select-Object -First 40
+      - name: Upload R62 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r62-xg-model-container-decoded-anchor
+          path: |
+            r62-model-anchor/*
+            r35-proven-startup-summary.txt
+          if-no-files-found: warn
+          retention-days: 14
