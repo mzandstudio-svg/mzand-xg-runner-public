@@ -57,30 +57,17 @@ jobs:
         run: |
           $ErrorActionPreference='Continue'
           $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
-          $out=Join-Path $env:GITHUB_WORKSPACE 'r59-network-stdout.txt'
-          $err=Join-Path $env:GITHUB_WORKSPACE 'r59-network-stderr.txt'
-          $args=@(
-            './scripts/r59b-xg-network-access-trace-abi.py',
-            '--pid', "$($xg.Id)",
-            '--xg-exe', "$env:XG_EXE",
-            '--outdir', './r59-network-trace',
-            '--seconds', '55',
-            '--max-hits', '24'
-          )
-          $p=Start-Process python -ArgumentList $args -PassThru -RedirectStandardOutput $out -RedirectStandardError $err
-          try { Wait-Process -Id $p.Id -Timeout 80 -ErrorAction Stop }
-          catch {
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-            if(Test-Path $out){Get-Content $out}
-            if(Test-Path $err){Get-Content $err}
-            throw 'R59 trace watchdog timeout'
-          }
-          $p.Refresh()
-          if(Test-Path $out){Get-Content $out}
-          if(Test-Path $err){Get-Content $err}
+          New-Item -ItemType Directory -Force ./r59-network-trace | Out-Null
+          python ./scripts/r59b-xg-network-access-trace-abi.py `
+            --pid $xg.Id `
+            --xg-exe "$env:XG_EXE" `
+            --outdir ./r59-network-trace `
+            --seconds 55 `
+            --max-hits 24 2>&1 | Tee-Object -FilePath ./r59-network-console.txt
+          $rc=$LASTEXITCODE
+          "R59_TRACE_RC=$rc" | Out-File ./r59-network-trace/r59-run-result.txt
           if(Test-Path './r59-network-trace/r59-summary.txt'){Get-Content './r59-network-trace/r59-summary.txt'}
-          "R59_TRACE_RC=$($p.ExitCode)" | Out-File ./r59-network-trace/r59-run-result.txt
-          if($p.ExitCode-ne0){throw "R59 trace failed rc=$($p.ExitCode)"}
+          if($rc-ne0){throw "R59 trace failed rc=$rc"}
 
       - name: Upload R59 evidence
         if: always()
@@ -89,8 +76,7 @@ jobs:
           name: r59-xg-network-access-trace
           path: |
             r59-network-trace/*
-            r59-network-stdout.txt
-            r59-network-stderr.txt
+            r59-network-console.txt
             r35-proven-startup-summary.txt
             r35-proven-startup-report.txt
           if-no-files-found: warn
