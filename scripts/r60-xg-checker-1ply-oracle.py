@@ -70,7 +70,8 @@ def extract_move_analysis(path: Path) -> dict:
             })
     if not candidates:
         raise RuntimeError("no analyzed MoveEntry/DataMoves found in XGP")
-    exact = [c for c in candidates if any(r["level"] == 0 for r in c["rows"])]
+    # Prefer a record whose candidate evaluations are explicitly binary Level=0.
+    exact = [c for c in candidates if c["rows"] and all(r["level"] == 0 for r in c["rows"])]
     return exact[-1] if exact else candidates[-1]
 
 
@@ -87,7 +88,9 @@ def move_text(raw) -> str:
 
 
 def analyze_one(auto: XGAutomator, helpers, xgid: str, out_xgp: Path) -> dict:
-    helpers.configure_exact_1ply(auto)
+    # Do not depend on the fragile Set Analyze Level dialog. The exported binary
+    # is the authority: this probe accepts results only if every candidate says
+    # EvalLevel.Level == 0 (XG's exact 1-ply level in the recovered format).
     auto.import_xgid_from_file(xgid)
     time.sleep(0.8)
     auto.send_command(auto.cmd.CLEAR_ANALYZE)
@@ -102,7 +105,13 @@ def analyze_one(auto: XGAutomator, helpers, xgid: str, out_xgp: Path) -> dict:
             pass
         time.sleep(0.5)
     helpers.export_xgp(auto, out_xgp)
-    return extract_move_analysis(out_xgp)
+    result = extract_move_analysis(out_xgp)
+    levels = sorted({r["level"] for r in result["rows"]})
+    print("R60_BINARY_EVAL_LEVELS=" + ",".join(str(x) for x in levels))
+    if levels != [0]:
+        raise RuntimeError(f"R60 binary candidate levels are {levels}, expected exact [0]")
+    print("R60_BINARY_EXACT_1PLY_GATE=PASS")
+    return result
 
 
 def main() -> int:
