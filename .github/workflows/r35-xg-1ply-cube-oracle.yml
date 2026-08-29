@@ -8,6 +8,7 @@ on:
       - scripts/r35-xg-1ply-oracle.py
       - scripts/r35-proven-startup.ps1
       - scripts/r50f-xg-analysis-level-forensic.py
+      - scripts/r50g-xg-registry-forensic.ps1
       - corpus/r35-xg-oracle-corpus.tsv
   workflow_dispatch:
 
@@ -67,6 +68,10 @@ jobs:
       - name: Reach proven ready XG instance
         shell: powershell
         run: ./scripts/r35-proven-startup.ps1
+
+      - name: R50G forensic capture of XG analysis registry
+        shell: powershell
+        run: ./scripts/r50g-xg-registry-forensic.ps1
 
       - name: R50F forensic capture of Analyze Level controls
         shell: powershell
@@ -147,6 +152,8 @@ jobs:
             r35-xg-install.log
             r50f-analysis-level-console.txt
             r50f-analysis-level-forensic.txt
+            r50g-xg-registry.txt
+            r50g-xg-registry.reg
             r35-smoke-xgp/*.xgp
             r35-xgp/*.xgp
           if-no-files-found: ignore
