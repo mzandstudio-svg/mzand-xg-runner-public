@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -18,46 +19,70 @@ mod = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = mod
 spec.loader.exec_module(mod)
 
+# R67's accepted Ctrl+1 oracle did not launch into an arbitrary fresh XG UI.
+# It first ran r35-proven-startup.ps1 and required XGID_POSITION_READY=True.
+# Reuse that exact precondition here before connecting the matrix oracle.
+# This is capture-harness stabilization only; binary XGP EvalLevel remains the
+# authority for accepting or rejecting each requested depth.
+startup = Path(__file__).resolve().with_name("r35-proven-startup.ps1")
+if not startup.exists():
+    raise SystemExit(f"missing proven startup helper: {startup}")
+print(f"R74_PROVEN_STARTUP_BEGIN script={startup}", flush=True)
+cp = subprocess.run(
+    ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(startup)],
+    text=True,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+)
+print(cp.stdout, end="", flush=True)
+if cp.returncode != 0:
+    raise SystemExit(f"R74 proven startup failed rc={cp.returncode}")
+print("R74_PROVEN_STARTUP=PASS", flush=True)
+
 # R74 matrix runs in a fresh isolated Windows VM, so clipboard import is safe
 # and avoids the flaky common-file-dialog path used by import_xgid_from_file().
-# The underlying XGAutomator.import_xgid() still validates the XGID, sends the
+# The underlying XGAutomator.import_xgid() validates the XGID, sends the
 # official IMPORT_POS_CLIPBOARD command, and waits for the position to load.
-# Keep retries local to the capture harness; exported XGP EvalLevel remains the
-# only authority for accepting a depth result.
 def _matrix_import_xgid(self: XGAutomator, xgid: str) -> None:
     last = None
-    for attempt in range(1, 4):
-        try:
-            print(
-                f"R74_IMPORT_XGID mode=clipboard attempt={attempt}",
-                flush=True,
-            )
-            self.import_xgid(xgid)
-            print(
-                f"R74_IMPORT_XGID=PASS mode=clipboard attempt={attempt}",
-                flush=True,
-            )
-            return
-        except Exception as exc:
-            last = exc
-            print(
-                f"R74_IMPORT_XGID=RETRY attempt={attempt} error={exc}",
-                flush=True,
-            )
+    old_timeout = self.timeout
+    # Position import should be immediate once proven startup is established;
+    # keep failures bounded so a broken harness does not masquerade as deep-ply
+    # computation time.
+    self.timeout = min(float(old_timeout), 20.0)
+    try:
+        for attempt in range(1, 3):
             try:
-                self._dismiss_unexpected_dialogs(accept=False)
-            except Exception:
-                pass
-            time.sleep(1.0)
+                print(
+                    f"R74_IMPORT_XGID mode=clipboard attempt={attempt}",
+                    flush=True,
+                )
+                self.import_xgid(xgid)
+                print(
+                    f"R74_IMPORT_XGID=PASS mode=clipboard attempt={attempt}",
+                    flush=True,
+                )
+                return
+            except Exception as exc:
+                last = exc
+                print(
+                    f"R74_IMPORT_XGID=RETRY attempt={attempt} error={exc}",
+                    flush=True,
+                )
+                try:
+                    self._dismiss_unexpected_dialogs(accept=False)
+                except Exception:
+                    pass
+                time.sleep(1.0)
+    finally:
+        self.timeout = old_timeout
     raise RuntimeError(f"R74 clipboard XGID import failed after retries: {last}")
 
 
 XGAutomator.import_xgid_from_file = _matrix_import_xgid
 
-# R74 matrix runs exactly one position in a fresh Windows VM.  The legacy
-# R35 fallback recursively walks USERPROFILE/TEMP/LOCALAPPDATA/APPDATA looking
-# for a misnamed XGP.  That is useful for broad forensic recovery but can make
-# a one-position oracle spend minutes crawling unrelated files.  Keep the
+# R74 matrix runs exactly one position in a fresh Windows VM. The legacy R35
+# fallback recursively walks large profile trees for a misnamed XGP. Keep the
 # proven headless Save-As operation, but bound fallback discovery to the
 # requested directory and current workspace and require export-time freshness.
 _orig_load_helpers = mod.load_r35_helpers
@@ -72,8 +97,6 @@ def _load_helpers_bounded():
         if out.exists():
             out.unlink()
 
-        # XG headless commonly ignores the requested basename and writes
-        # Position.xgp / Position N.xgp beside the requested destination.
         for q in out.parent.glob("Position*.xgp"):
             try:
                 if q.resolve() != out:
