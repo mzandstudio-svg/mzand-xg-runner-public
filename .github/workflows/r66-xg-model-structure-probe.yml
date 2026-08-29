@@ -1,0 +1,40 @@
+name: R66 XG Model Structure Probe
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r66-xg-model-structure-probe.yml
+      - scripts/r66-xg-model-structure-probe.py
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+      - name: Probe decoded model structure
+        shell: powershell
+        run: |
+          python ./scripts/r66-xg-model-structure-probe.py --xg-exe "$env:XG_EXE" --outdir ./r66-model-structure
+          Get-Content ./r66-model-structure/r66-summary.txt
+          Get-ChildItem ./r66-model-structure/*-summary.txt | ForEach-Object { Get-Content $_.FullName }
+          Get-ChildItem ./r66-model-structure/*-near-dims.tsv | ForEach-Object { Get-Content $_.FullName | Select-Object -First 120 }
+      - name: Upload R66 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r66-xg-model-structure-probe
+          path: r66-model-structure/*
+          retention-days: 14
