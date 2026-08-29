@@ -1,0 +1,72 @@
+name: R60 XG Checker 1-ply Oracle
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r60-xg-checker-1ply-oracle.yml
+      - scripts/r60-xg-checker-1ply-oracle.py
+      - scripts/r35-xg-1ply-oracle.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oracle:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Install XG parser and automation dependencies
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $ag=Join-Path $env:RUNNER_TEMP 'AnkiGammon'
+          git clone --depth 1 https://github.com/Deinonychus999/AnkiGammon.git $ag
+          python -m pip install --upgrade pip
+          python -m pip install -e $ag
+          python -m pip install pywinauto pyautogui pymem
+
+      - name: Reach proven unpacked XG2 instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+
+      - name: Capture exact checker 1-ply candidates and TResult
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          python ./scripts/r60-xg-checker-1ply-oracle.py `
+            --output ./R60-XG-CHECKER-1PLY.tsv `
+            --xgp ./R60-Position.xgp
+          Get-Content ./R60-XG-CHECKER-1PLY.summary.txt
+          Get-Content ./R60-XG-CHECKER-1PLY.tsv
+
+      - name: Upload R60 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r60-xg-checker-1ply-oracle
+          path: |
+            R60-XG-CHECKER-1PLY.tsv
+            R60-XG-CHECKER-1PLY.summary.txt
+            R60-Position.xgp
+            r35-proven-startup-summary.txt
+            r35-proven-startup-report.txt
+          if-no-files-found: warn
+          retention-days: 14
