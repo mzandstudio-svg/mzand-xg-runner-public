@@ -5,7 +5,7 @@ on:
     branches: [r35-xg-1ply-cube-oracle]
     paths:
       - .github/workflows/r74-xg-checker-depth-oracle.yml
-      - scripts/r74-xg-checker-depth-oracle.py
+      - scripts/r74-xg-checker-depth-keyboard-oracle.py
       - scripts/r35-xg-1ply-oracle.py
   workflow_dispatch:
 
@@ -35,7 +35,7 @@ jobs:
           "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
           Get-FileHash -Algorithm SHA256 $exe
 
-      - name: Prepare Python XG automation and PE parser
+      - name: Prepare Python XG automation
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
@@ -43,13 +43,13 @@ jobs:
           git clone --depth 1 https://github.com/Deinonychus999/AnkiGammon.git $ag
           python -m pip install --upgrade pip
           python -m pip install -e $ag
-          python -m pip install pywinauto pyautogui pymem pefile
+          python -m pip install pywinauto pyautogui pymem
 
-      - name: Capture official XG 1-4 ply checker oracle
+      - name: Capture official XG Ctrl+1 through Ctrl+4 checker oracle
         shell: powershell
         run: |
           $ErrorActionPreference='Continue'
-          python ./scripts/r74-xg-checker-depth-oracle.py `
+          python ./scripts/r74-xg-checker-depth-keyboard-oracle.py `
             --output ./R74-XG-CHECKER-DEPTH-ORACLE.tsv `
             --xgp-dir ./r74-xgp `
             *> ./r74-console.txt
@@ -58,9 +58,9 @@ jobs:
           if(Test-Path ./R74-XG-CHECKER-DEPTH-ORACLE.summary.txt){
             Get-Content ./R74-XG-CHECKER-DEPTH-ORACLE.summary.txt
           }
-          if($rc-ne0){throw "R74 oracle failed rc=$rc"}
+          if($rc-ne0){throw "R74 keyboard oracle failed rc=$rc"}
 
-      - name: Validate capture has all requested modes
+      - name: Validate binary EvalLevel authority
         shell: powershell
         run: |
           $ErrorActionPreference='Stop'
