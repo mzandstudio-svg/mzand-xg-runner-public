@@ -114,8 +114,12 @@ def enumerate_menu(hwnd: int) -> list[dict]:
 
     out: list[dict] = []
 
-    def walk(hmenu: int, prefix: list[str]) -> None:
+    def walk(hmenu: int, prefix: list[str], depth: int) -> None:
         count = int(user32.GetMenuItemCount(hmenu))
+        print(
+            f"R74_MENU_CONTAINER depth={depth} hmenu=0x{hmenu:X} count={count} prefix={' > '.join(prefix)!r}",
+            flush=True,
+        )
         for pos in range(max(0, count)):
             text = _menu_text(hmenu, pos)
             clean = text.replace("&", "").strip()
@@ -123,24 +127,29 @@ def enumerate_menu(hwnd: int) -> list[dict]:
             item_id = int(user32.GetMenuItemID(hmenu, pos))
             path = prefix + ([clean] if clean else [f"#{pos}"])
             row = {
+                "depth": depth,
+                "position": pos,
+                "hmenu": hmenu,
                 "path": " > ".join(path),
                 "text": text,
                 "clean": clean,
                 "id": item_id,
                 "submenu": bool(submenu),
+                "submenu_handle": submenu,
             }
             out.append(row)
-            if submenu:
-                walk(submenu, path)
-
-    walk(root, [])
-    for r in out:
-        lo = r["clean"].lower()
-        if "ply" in lo or "roller" in lo or "analy" in lo or "ctrl+" in lo:
             print(
-                f"R74_MENU id={r['id']} submenu={int(r['submenu'])} path={r['path']!r}",
+                "R74_MENU_ALL "
+                f"depth={depth} pos={pos} hmenu=0x{hmenu:X} "
+                f"id={item_id} submenu={int(bool(submenu))} "
+                f"submenu_h=0x{submenu:X} raw={text!r} path={row['path']!r}",
                 flush=True,
             )
+            if submenu:
+                walk(submenu, path, depth + 1)
+
+    walk(root, [], 0)
+    print(f"R74_MENU_ALL_COUNT={len(out)}", flush=True)
     return out
 
 
@@ -172,6 +181,7 @@ def discover_ply_commands(hwnd: int) -> dict[int, int]:
 
         candidates.sort(key=lambda x: (-x[0], x[1]["path"]))
         if not candidates:
+            print(f"R74_DISCOVERY_MISS digit={digit}", flush=True)
             raise RuntimeError(f"no live XG menu command found for {digit}-ply")
 
         best_score = candidates[0][0]
@@ -194,8 +204,6 @@ def discover_ply_commands(hwnd: int) -> dict[int, int]:
 
 
 def send_menu_command(hwnd: int, cmd: int, digit: int) -> None:
-    # Native menu invocation: HIWORD(wParam)=0. This reaches the same TMenuItem
-    # OnClick handler as the Ctrl+digit shortcut, without keyboard focus.
     result = user32.SendMessageW(hwnd, WM_COMMAND, cmd & 0xFFFF, 0)
     print(
         f"R74_MENU_COMMAND_SENT ctrl={digit} cmd={cmd} result={int(result)}",
@@ -218,7 +226,6 @@ def analyze_level(
     time.sleep(1.0)
     auto.send_command(auto.cmd.CLEAR_ANALYZE)
     time.sleep(0.6)
-
     send_menu_command(int(auto._hwnd), cmd, digit)
     print(f"R74_EVAL_WAIT label={label} seconds={wait_s}", flush=True)
 
@@ -261,15 +268,8 @@ def main() -> int:
             out_xgp = (a.xgp_dir / f"r74-{target}-{label}.xgp").resolve()
             out_xgp.parent.mkdir(parents=True, exist_ok=True)
             result = analyze_level(
-                auto,
-                helpers,
-                a.xgid,
-                label,
-                target,
-                digit,
-                wait_s,
-                commands[digit],
-                out_xgp,
+                auto, helpers, a.xgid, label, target, digit,
+                wait_s, commands[digit], out_xgp,
             )
             levels = sorted({r["level"] for r in result["rows"]})
             best = max(result["rows"], key=lambda r: r["eval"][6])
