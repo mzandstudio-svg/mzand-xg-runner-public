@@ -1,0 +1,56 @@
+name: R54 XG Dead Endpoint Static Recovery
+
+on:
+  push:
+    branches: [r35-xg-1ply-cube-oracle]
+    paths:
+      - .github/workflows/r54-xg-dead-endpoint-static.yml
+      - scripts/r54-xg-dead-endpoint-static.py
+      - scripts/r35-proven-startup.ps1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install official XG2
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:RUNNER_TEMP 'xg2install.exe'
+          Invoke-WebRequest 'https://www.extremegammon.com/xg2install.exe' -OutFile $installer -UseBasicParsing
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-') -Wait -PassThru
+          if($p.ExitCode-ne0){throw "XG install failed: $($p.ExitCode)"}
+          $exe='C:\Program Files (x86)\eXtreme Gammon 2\eXtremeGammon2.exe'
+          if(-not(Test-Path $exe)){throw "XG executable missing: $exe"}
+          "XG_EXE=$exe" | Out-File $env:GITHUB_ENV -Append
+          "xgexe=$exe" | Out-File $env:GITHUB_ENV -Append
+      - name: Install capstone
+        shell: powershell
+        run: python -m pip install capstone
+      - name: Reach proven unpacked XG2 instance
+        shell: powershell
+        run: ./scripts/r35-proven-startup.ps1
+      - name: Recover dead endpoint static path
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $xg=Get-Process eXtremeGammon2 -ErrorAction Stop | Select-Object -First 1
+          python ./scripts/r54-xg-dead-endpoint-static.py --pid $xg.Id --outdir ./r54-dead-static
+          Get-Content ./r54-dead-static/r54-summary.txt
+          Get-Content ./r54-dead-static/r54-dead-xrefs.tsv
+      - name: Upload R54 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r54-xg-dead-endpoint-static
+          path: |
+            r54-dead-static/*
+            r35-proven-startup-summary.txt
+          if-no-files-found: warn
+          retention-days: 14
